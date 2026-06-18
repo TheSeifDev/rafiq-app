@@ -260,7 +260,7 @@ export function EmergencyProfileScreen({ navigation }: Props): React.JSX.Element
             )}
           </CollapsibleSection>
 
-          <View style={{ height: spacing['2xl'] }} />
+          <View style={{ height: 110 }} />
         </ScrollView>
       </KeyboardAvoidingView>
 

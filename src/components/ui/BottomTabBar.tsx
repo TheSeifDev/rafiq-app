@@ -1,6 +1,6 @@
 /**
  * BottomTabBar - Production-grade iOS-style navigation
- * Real BlurView, proper alignment, accessible colors
+ * Tabs: Home · Emergency · Medications · Chat · Profile
  */
 import React, { memo, useCallback } from "react";
 import { View, Pressable, StyleSheet, Platform } from "react-native";
@@ -18,10 +18,16 @@ const TABS: Record<
     active: keyof typeof Ionicons.glyphMap;
     inactive: keyof typeof Ionicons.glyphMap;
     labelKey: keyof (typeof translations)["en"];
+    accentColor?: string;
   }
 > = {
   Home: { active: "home", inactive: "home-outline", labelKey: "home" },
-  Vitals: { active: "pulse", inactive: "pulse-outline", labelKey: "vitals" },
+  Emergency: {
+    active: "shield-checkmark",
+    inactive: "shield-checkmark-outline",
+    labelKey: "emergency",
+    accentColor: "#FF3B3B",
+  },
   Medications: {
     active: "medical",
     inactive: "medical-outline",
@@ -40,10 +46,9 @@ const TABS: Record<
 };
 
 /**
- * Tab Button - Clean, production-ready, no infinite animations
+ * Tab Button - Clean, production-ready
  */
 const TabButton = memo(function TabButton({
-  route,
   isFocused,
   label,
   tab,
@@ -53,7 +58,7 @@ const TabButton = memo(function TabButton({
   route: any;
   isFocused: boolean;
   label: string;
-  tab: typeof TABS[string];
+  tab: (typeof TABS)[string];
   onPress: () => void;
   colors: any;
 }) {
@@ -62,6 +67,9 @@ const TabButton = memo(function TabButton({
       onPress();
     }
   }, [isFocused, onPress]);
+
+  const activeColor = tab.accentColor ?? colors.primary;
+  const iconColor = isFocused ? activeColor : colors.textSecondary;
 
   return (
     <Pressable
@@ -74,7 +82,7 @@ const TabButton = memo(function TabButton({
         <Ionicons
           name={isFocused ? tab.active : tab.inactive}
           size={24}
-          color={isFocused ? colors.primary : colors.textSecondary}
+          color={iconColor}
         />
       </View>
 
@@ -83,7 +91,7 @@ const TabButton = memo(function TabButton({
         style={[
           styles.label,
           {
-            color: isFocused ? colors.primary : colors.textSecondary,
+            color: iconColor,
             fontWeight: isFocused ? "600" : "500",
           },
         ]}

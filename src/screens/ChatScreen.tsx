@@ -16,7 +16,6 @@ import {
   StatusBar,
   TextInput,
   Animated,
-  Image, // ← import ready for when you add the real AI avatar image
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -43,23 +42,16 @@ function PremiumHeader({ isRTL, theme }: { isRTL: boolean; theme: ChatTheme }) {
     <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
       <View style={styles.headerContent}>
         <View style={[styles.avatarCircle, { backgroundColor: theme.primarySoft }]}>
-          {/*
-           * TODO: Replace with AI avatar image, e.g.:
-           * <Image
-           *   source={require('../assets/ai-avatar.png')}
-           *   style={{ width: 28, height: 28, borderRadius: 14 }}
-           * />
-           */}
           <Ionicons name="heart" size={22} color={theme.primary} />
           <View style={[styles.onlineIndicator, { backgroundColor: theme.online }]} />
         </View>
 
         <View style={styles.headerTextContainer}>
-          <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>RAFIQ</Text>
+          <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>Rafiq</Text>
           <View style={styles.statusRow}>
             <View style={[styles.statusDot, { backgroundColor: theme.online }]} />
             <Text style={[styles.statusText, { color: theme.textSecondary }]}>
-              {isRTL ? 'متصل' : 'Online'}
+              {isRTL ? 'المساعد الطبي الذكي · متصل' : 'Medical AI Assistant · Online'}
             </Text>
           </View>
         </View>
@@ -320,11 +312,13 @@ export function ChatScreen(): React.JSX.Element {
 
   let tabH = 0;
   try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
     tabH = useBottomTabBarHeight();
   } catch {
     tabH = Platform.OS === "ios" ? 83 : 62;
   }
-  const bottomOffset = tabH + insets.bottom;
+  // Ensure a safe minimum for edge cases
+  const bottomOffset = Math.max(tabH, Platform.OS === 'ios' ? 83 : 62) + insets.bottom;
 
   const [healthContext, setHealthContext] = useState<HealthContextData>({
     patientName: "User",
@@ -426,7 +420,10 @@ export function ChatScreen(): React.JSX.Element {
 
   return (
     <Screen style={{ backgroundColor: theme.background }}>
-      <StatusBar barStyle="dark-content" backgroundColor={theme.surface} />
+      <StatusBar
+        barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.surface}
+      />
 
       {/*
         FIX 4 – behavior="padding" on BOTH platforms gives the WhatsApp
@@ -434,8 +431,8 @@ export function ChatScreen(): React.JSX.Element {
         Adjust keyboardVerticalOffset to match your navigation header height.
       */}
       <KeyboardAvoidingView
-        style={styles.flex}
-        behavior="padding"
+        style={[styles.flex, { backgroundColor: theme.background }]}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
       >
         <PremiumHeader isRTL={isRTL} theme={theme} />
@@ -445,6 +442,10 @@ export function ChatScreen(): React.JSX.Element {
           data={messages}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
+          initialNumToRender={12}
+          maxToRenderPerBatch={10}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS === "android"}
           contentContainerStyle={[styles.listContent, { paddingBottom: 16 }]}
           ListEmptyComponent={
             <EmptyState onSelect={sendMessage} isRTL={isRTL} theme={theme} />

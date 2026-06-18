@@ -11,6 +11,7 @@ import type {
   HospitalData,
 } from '../types/database';
 import { offlineQueue, SyncPriority } from '../lib/offlineQueue';
+import { createUuid } from '../utils/uuid';
 
 // ─────────────────────────────────────────
 // Explicit DTO contracts (no Partial<T>)
@@ -184,10 +185,6 @@ function serializeJsonb(val: unknown): string | null {
   return JSON.stringify(val);
 }
 
-function generateLocalId(prefix: string): string {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-}
-
 function getDeviceId(): string {
   return `device_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -265,7 +262,7 @@ export class PatientRepository extends BaseRepository<PatientRow, PatientInsert,
    * No Partial<T>, no as unknown as.
    */
   async createPatient(payload: PatientInsert): Promise<PatientRow> {
-    const id = generateLocalId('pat');
+    const id = createUuid();
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
 
@@ -319,21 +316,10 @@ export class PatientRepository extends BaseRepository<PatientRow, PatientInsert,
       values
     );
 
-    // Sync payload with full contract
     await offlineQueue.enqueue({
       table: this.tableName,
       operation: 'INSERT',
-      payload: {
-        id,
-        entity: this.tableName,
-        operation: 'INSERT',
-        payload: row,
-        device_id: deviceId,
-        sync_version: 1,
-        idempotency_key: `sync_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-        created_at: now,
-        updated_at: now,
-      },
+      payload: row as unknown as Record<string, unknown>,
       recordId: id,
       priority: 'critical',
       userId: payload.user_id,
@@ -431,7 +417,7 @@ export class EmergencyContactRepository extends BaseRepository<EmergencyContactR
     }
 
     // Build row directly
-    const id = generateLocalId('con');
+    const id = createUuid();
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
 

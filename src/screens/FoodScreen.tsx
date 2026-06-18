@@ -525,7 +525,7 @@ export function FoodScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   content: {
     padding: spacing.md,
-    paddingBottom: spacing.xl * 2,
+    paddingBottom: 110,
   },
   searchBar: {
     flexDirection: 'row',

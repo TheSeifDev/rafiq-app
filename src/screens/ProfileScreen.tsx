@@ -7,17 +7,7 @@ import {
   Switch,
   Alert,
   RefreshControl,
-  Modal,
-  TextInput,
-  Pressable,
-  Animated,
-  useWindowDimensions,
 } from "react-native";
-import {
-  useDevicesStore,
-  type Device,
-  type DeviceType,
-} from "../store/devices.store";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen } from "../components/ui/Screen";
 import { AppText } from "../components/ui/AppText";
@@ -34,31 +24,8 @@ import type { ProfileStackScreenProps } from "../navigation/types";
 
 type Props = ProfileStackScreenProps<"ProfileMain">;
 
-// ── Device helpers (logic untouched) ──
-const DEVICE_ICONS: Record<DeviceType, string> = {
-  gas: "flame-outline",
-  motion: "radio-outline",
-};
-// Device colors are kept as raw values here since they're semantic brand colors
-// (watch = blue, gas = amber, motion = purple) — not background/surface colors.
-// These intentionally differ from the main theme's primary color.
-const DEVICE_COLORS: Record<DeviceType, string> = {
-  gas: '#F59E0B',
-  motion: '#8B5CF6',
-};
-const TYPE_OPTIONS: { key: DeviceType; labelAr: string; labelEn: string }[] = [
-  { key: "gas", labelAr: "حساس غاز", labelEn: "Gas Sensor" },
-  { key: "motion", labelAr: "حساس حركة", labelEn: "Motion Sensor" },
-];
-function timeAgo(iso: string, isAr: boolean): string {
-  const diff = Math.max(0, Date.now() - new Date(iso).getTime());
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return isAr ? "الآن" : "Just now";
-  if (m < 60) return isAr ? `منذ ${m} د` : `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return isAr ? `منذ ${h} س` : `${h}h ago`;
-  return isAr ? `منذ ${Math.floor(h / 24)} ي` : `${Math.floor(h / 24)}d ago`;
-}
+// ─── Bottom safe spacing (above floating tab bar) ─────────────
+const BOTTOM_SAFE_SPACING = 110;
 
 /* ── Section Card ── */
 function SectionCard({
@@ -68,7 +35,6 @@ function SectionCard({
 }: {
   title: string;
   children: React.ReactNode;
-  darkMode?: boolean;
   colors: any;
 }) {
   return (
@@ -103,7 +69,6 @@ function SettingsRow({
   showChevron?: boolean;
   isDestructive?: boolean;
   isLast?: boolean;
-  darkMode?: boolean;
   colors: any;
 }) {
   const textColor = isDestructive ? colors.danger : colors.textPrimary;
@@ -134,90 +99,14 @@ function SettingsRow({
   return content;
 }
 
-/* ── Device Card ── */
-function DeviceCard({
-  device, darkMode, colors, isAr, onRename, onDelete, onToggle,
-}: {
-  device: Device; darkMode: boolean; colors: any; isAr: boolean;
-  onRename: () => void; onDelete: () => void; onToggle?: () => void;
-}) {
-  const accent = DEVICE_COLORS[device.type] ?? colors.primary;
-  const statusColor = device.isConnected ? colors.success : colors.textSecondary;
-  const statusLabel = device.isConnected ? (isAr ? "متصل" : "Online") : (isAr ? "غير متصل" : "Offline");
-  const bg = darkMode ? "rgba(30, 41, 59, 0.60)" : "rgba(248, 250, 252, 0.90)";
-  // Battery display removed - sensors don't have battery status
-  const bv = null;
-  const batIcon = null;
-  const batColor = null;
-
-  return (
-    <TouchableOpacity activeOpacity={0.7} onLongPress={onRename} style={[st.deviceCard, { backgroundColor: bg }]}>
-      <View style={[st.deviceIconWrap, { backgroundColor: accent + "15" }]}>
-        <Ionicons name={DEVICE_ICONS[device.type] as any} size={22} color={accent} />
-      </View>
-      <View style={st.deviceInfo}>
-        <AppText style={[st.deviceName, { color: colors.textPrimary }]}>{device.name}</AppText>
-        <View style={st.deviceMeta}>
-          <View style={[st.statusDot, { backgroundColor: statusColor }]} />
-          <AppText style={[st.deviceMetaText, { color: colors.textSecondary }]}>{statusLabel}</AppText>
-          <AppText style={[st.deviceMetaText, { color: colors.textSecondary }]}>· {timeAgo(device.lastSeen, isAr)}</AppText>
-        </View>
-      </View>
-      {/* Battery display removed - no battery for gas/motion sensors */}
-      <View style={st.deviceActions}>
-        <TouchableOpacity hitSlop={8} onPress={onToggle} style={[st.deviceActBtn, { backgroundColor: (device.isConnected ? colors.success : colors.textSecondary) + "12" }]}>
-          <Ionicons name={device.isConnected ? "link" : "unlink"} size={14} color={device.isConnected ? colors.success : colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity hitSlop={8} onPress={onDelete} style={[st.deviceActBtn, { backgroundColor: colors.danger + "12" }]}>
-          <Ionicons name="trash-outline" size={14} color={colors.danger} />
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
-}
-
 /* ════════ MAIN PROFILE SCREEN ════════ */
 export function ProfileScreen({ navigation }: Props): React.JSX.Element {
   const session = useAuthStore((s) => s.session);
   const signOut = useAuthStore((s) => s.signOut);
-  const { colors, darkMode, isRTL } = useTheme();
+  const { colors, darkMode } = useTheme();
   const { language, darkMode: isDark, setDarkMode, setLanguage } = useAppStore();
   const t = translations[language] as any;
   const isAr = language === "ar";
-
-  // Devices store
-  const { devices, addDevice, removeDevice, renameDevice, _hydrate } = useDevicesStore();
-  useEffect(() => { _hydrate(); }, []);
-
-  // Modal state
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [addName, setAddName] = useState("");
-  const [addType, setAddType] = useState<DeviceType>("gas");
-  const [renameTarget, setRenameTarget] = useState<Device | null>(null);
-  const [renameTxt, setRenameTxt] = useState("");
-
-  const handleAddDevice = () => {
-    if (!addName.trim()) return;
-    addDevice(addName.trim(), addType);
-    setAddName("");
-    setAddType("gas");
-    setShowAddModal(false);
-  };
-  const handleRenameSubmit = () => {
-    if (renameTarget && renameTxt.trim()) renameDevice(renameTarget.id, renameTxt.trim());
-    setRenameTarget(null);
-    setRenameTxt("");
-  };
-  const handleDelete = (d: Device) => {
-    Alert.alert(
-      isAr ? "حذف الجهاز" : "Remove Device",
-      isAr ? `هل تريد حذف "${d.name}"؟` : `Remove "${d.name}"?`,
-      [
-        { text: t.cancel, style: "cancel" },
-        { text: t.confirm, style: "destructive", onPress: () => removeDevice(d.id) },
-      ],
-    );
-  };
 
   const [profile, setProfile] = useState<PatientProfile | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -254,7 +143,7 @@ export function ProfileScreen({ navigation }: Props): React.JSX.Element {
     <Screen>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={st.scroll}
+        contentContainerStyle={[st.scroll, { paddingBottom: BOTTOM_SAFE_SPACING }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         {/* ════════ PROFILE HEADER ════════ */}
@@ -278,10 +167,10 @@ export function ProfileScreen({ navigation }: Props): React.JSX.Element {
         </View>
 
         {/* ════════ PREFERENCES ════════ */}
-        <SectionCard title={t.preferences} darkMode={darkMode} colors={colors}>
+        <SectionCard title={t.preferences} colors={colors}>
           <SettingsRow
             icon="moon-outline" iconColor="#7C3AED" label={t.darkMode}
-            darkMode={darkMode} colors={colors} showChevron={false}
+            colors={colors} showChevron={false}
             rightContent={
               <Switch value={isDark} onValueChange={setDarkMode}
                 trackColor={{ false: "#D1D5DB", true: colors.primary + "50" }}
@@ -290,7 +179,7 @@ export function ProfileScreen({ navigation }: Props): React.JSX.Element {
           />
           <SettingsRow
             icon="language-outline" iconColor="#00C2FF" label={t.language}
-            darkMode={darkMode} colors={colors} showChevron={false}
+            colors={colors} showChevron={false}
             rightContent={
               <View style={st.langToggle}>
                 <TouchableOpacity onPress={() => setLanguage("ar")}
@@ -305,56 +194,26 @@ export function ProfileScreen({ navigation }: Props): React.JSX.Element {
             }
           />
           <SettingsRow icon="notifications-outline" iconColor="#F59E0B" label={t.notificationsLabel}
-            onPress={() => (navigation as any).navigate("NotificationSettings")} darkMode={darkMode} colors={colors} isLast />
-        </SectionCard>
-
-        {/* ════════ CONNECTED DEVICES ════════ */}
-        <SectionCard title={t.devicesSection} darkMode={darkMode} colors={colors}>
-          <View style={st.devicesContainer}>
-            {devices.map((device) => (
-              <DeviceCard key={device.id} device={device} darkMode={darkMode} colors={colors} isAr={isAr}
-                onRename={() => { setRenameTarget(device); setRenameTxt(device.name); }}
-                onDelete={() => handleDelete(device)} />
-            ))}
-            {devices.length === 0 && (
-              <View style={st.emptyDevices}>
-                <View style={[st.emptyDevIcon, { backgroundColor: colors.textSecondary + "10" }]}>
-                  <Ionicons name="hardware-chip-outline" size={28} color={colors.textSecondary + "50"} />
-                </View>
-                <AppText style={{ color: colors.textSecondary, fontSize: 13, fontWeight: "500" }}>
-                  {isAr ? "لا يوجد أجهزة" : "No devices added"}
-                </AppText>
-              </View>
-            )}
-            <TouchableOpacity activeOpacity={0.7} onPress={() => setShowAddModal(true)}
-              style={[st.addDeviceBtn, { borderColor: colors.primary + "30" }]}>
-              <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
-              <AppText style={[st.addDeviceText, { color: colors.primary }]}>{t.addDevice}</AppText>
-            </TouchableOpacity>
-          </View>
+            onPress={() => (navigation as any).navigate("NotificationSettings")} colors={colors} isLast />
         </SectionCard>
 
         {/* ════════ HEALTH DATA ════════ */}
-        <SectionCard title={t.healthData} darkMode={darkMode} colors={colors}>
+        <SectionCard title={t.healthData} colors={colors}>
           <SettingsRow icon="medical-outline" iconColor="#10B981" label={t.medications}
-            onPress={() => navigation.navigate("Medications")} darkMode={darkMode} colors={colors} />
-          <SettingsRow icon="restaurant-outline" iconColor="#F97316" label={t.foodTitle || (isAr ? 'التغذية' : 'Nutrition')}
-            onPress={() => navigation.navigate("Food")} darkMode={darkMode} colors={colors} />
-          <SettingsRow icon="trending-up-outline" iconColor="#8B5CF6" label={t.weeklyTrendsTitle || (isAr ? 'الاتجاهات الأسبوعية' : 'Weekly Trends')}
-            onPress={() => navigation.navigate("WeeklyTrends")} darkMode={darkMode} colors={colors} />
-          <SettingsRow icon="watch-outline" iconColor="#00C2FF" label={t.pairingTitle || (isAr ? 'ربط الساعة' : 'Watch Pairing')}
-            onPress={() => navigation.navigate("WearablePairing")} darkMode={darkMode} colors={colors} isLast />
+            onPress={() => navigation.navigate("Medications")} colors={colors} />
+          <SettingsRow icon="restaurant-outline" iconColor="#F97316" label={t.foodTitle || (isAr ? "التغذية" : "Nutrition")}
+            onPress={() => navigation.navigate("Food")} colors={colors} isLast />
         </SectionCard>
 
         {/* ════════ SECURITY ════════ */}
-        <SectionCard title={t.securitySection} darkMode={darkMode} colors={colors}>
+        <SectionCard title={t.securitySection} colors={colors}>
           <SettingsRow icon="lock-closed-outline" iconColor="#7C3AED" label={t.changePassword}
-            onPress={() => navigation.navigate("ChangePassword")} darkMode={darkMode} colors={colors} />
+            onPress={() => navigation.navigate("ChangePassword")} colors={colors} />
           <SettingsRow icon="shield-outline" iconColor="#00C2FF" label={t.privacyLabel}
-            onPress={() => navigation.navigate("Privacy")} darkMode={darkMode} colors={colors} isLast />
+            onPress={() => navigation.navigate("Privacy")} colors={colors} isLast />
         </SectionCard>
 
-        {/* ════════ ACCOUNT (Logout) ════════ */}
+        {/* ════════ LOGOUT ════════ */}
         <View style={st.logoutSection}>
           <TouchableOpacity activeOpacity={0.7} onPress={handleSignOut}
             style={[st.logoutBtn, { backgroundColor: colors.danger + "0A", borderColor: colors.danger + "20" }]}>
@@ -362,61 +221,7 @@ export function ProfileScreen({ navigation }: Props): React.JSX.Element {
             <AppText style={[st.logoutText, { color: colors.danger }]}>{t.logout}</AppText>
           </TouchableOpacity>
         </View>
-
-        <View style={{ height: spacing["2xl"] }} />
       </ScrollView>
-
-      {/* ═══ ADD DEVICE MODAL ═══ */}
-      <Modal visible={showAddModal} transparent animationType="fade" onRequestClose={() => setShowAddModal(false)}>
-        <Pressable style={st.modalOverlay} onPress={() => setShowAddModal(false)}>
-          <Pressable style={[st.modalCard, { backgroundColor: colors.surface }]} onPress={() => {}}>
-            <AppText style={[st.modalTitle, { color: colors.textPrimary }]}>{isAr ? "إضافة جهاز" : "Add Device"}</AppText>
-            <TextInput value={addName} onChangeText={setAddName} placeholder={isAr ? "اسم الجهاز" : "Device name"}
-              placeholderTextColor={colors.textSecondary}
-              style={[st.modalInput, { color: colors.textPrimary, borderColor: colors.border, backgroundColor: colors.surfaceVariant }]} />
-            <AppText style={[st.modalSubLabel, { color: colors.textSecondary }]}>{isAr ? "نوع الجهاز" : "Device type"}</AppText>
-            <View style={st.typeRow}>
-              {TYPE_OPTIONS.map((opt) => (
-                <TouchableOpacity key={opt.key} onPress={() => setAddType(opt.key)}
-                  style={[st.typeBtn, addType === opt.key && { backgroundColor: colors.primary + "15", borderColor: colors.primary }]}>
-                  <Ionicons name={DEVICE_ICONS[opt.key] as any} size={18} color={addType === opt.key ? colors.primary : colors.textSecondary} />
-                  <AppText style={{ fontSize: 11, fontWeight: "700", color: addType === opt.key ? colors.primary : colors.textSecondary }}>
-                    {isAr ? opt.labelAr : opt.labelEn}
-                  </AppText>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <View style={st.modalBtnRow}>
-              <TouchableOpacity onPress={() => setShowAddModal(false)} style={[st.modalBtn, { backgroundColor: colors.textSecondary + "15" }]}>
-                <AppText style={{ color: colors.textSecondary, fontWeight: "700", fontSize: 14 }}>{t.cancel}</AppText>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleAddDevice} style={[st.modalBtn, { backgroundColor: colors.primary }]}>
-                <AppText style={{ color: "#fff", fontWeight: "800", fontSize: 14 }}>{isAr ? "إضافة" : "Add"}</AppText>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* ═══ RENAME MODAL ═══ */}
-      <Modal visible={renameTarget !== null} transparent animationType="fade" onRequestClose={() => setRenameTarget(null)}>
-        <Pressable style={st.modalOverlay} onPress={() => setRenameTarget(null)}>
-          <Pressable style={[st.modalCard, { backgroundColor: colors.surface }]} onPress={() => {}}>
-            <AppText style={[st.modalTitle, { color: colors.textPrimary }]}>{isAr ? "إعادة تسمية" : "Rename Device"}</AppText>
-            <TextInput value={renameTxt} onChangeText={setRenameTxt} placeholder={isAr ? "الاسم الجديد" : "New name"}
-              placeholderTextColor={colors.textSecondary} autoFocus
-              style={[st.modalInput, { color: colors.textPrimary, borderColor: colors.border, backgroundColor: colors.surfaceVariant }]} />
-            <View style={st.modalBtnRow}>
-              <TouchableOpacity onPress={() => setRenameTarget(null)} style={[st.modalBtn, { backgroundColor: colors.textSecondary + "15" }]}>
-                <AppText style={{ color: colors.textSecondary, fontWeight: "700", fontSize: 14 }}>{t.cancel}</AppText>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleRenameSubmit} style={[st.modalBtn, { backgroundColor: colors.primary }]}>
-                <AppText style={{ color: "#fff", fontWeight: "800", fontSize: 14 }}>{isAr ? "حفظ" : "Save"}</AppText>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
     </Screen>
   );
 }
@@ -425,7 +230,7 @@ export function ProfileScreen({ navigation }: Props): React.JSX.Element {
 const st = StyleSheet.create({
   scroll: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
 
-  /* Profile Header */
+  // Profile Header
   profileHeader: {
     alignItems: "center",
     padding: spacing.xl,
@@ -459,53 +264,24 @@ const st = StyleSheet.create({
   },
   editBtnText: { fontSize: 13, fontWeight: "700" },
 
-  /* Sections */
+  // Sections
   sectionWrap: { marginBottom: spacing.lg },
   sectionLabel: { fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: spacing.sm, marginLeft: spacing.xs },
   sectionCard: { borderRadius: radius.lg, borderWidth: 1, overflow: "hidden" },
 
-  /* Rows */
+  // Rows
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.md, paddingVertical: 14, gap: spacing.sm },
   rowIconWrap: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   rowLabel: { flex: 1, fontSize: 15, fontWeight: "600" },
   rowRight: { flexDirection: "row", alignItems: "center" },
 
-  /* Language toggle */
+  // Language toggle
   langToggle: { flexDirection: "row", gap: 4 },
   langBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 },
   langBtnText: { fontSize: 13, fontWeight: "700" },
 
-  /* Devices */
-  devicesContainer: { padding: spacing.sm, gap: spacing.sm },
-  deviceCard: { flexDirection: "row", alignItems: "center", padding: spacing.sm, borderRadius: radius.md, gap: spacing.sm },
-  deviceIconWrap: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center" },
-  deviceInfo: { flex: 1, gap: 2 },
-  deviceName: { fontSize: 14, fontWeight: "600" },
-  deviceMeta: { flexDirection: "row", alignItems: "center", gap: 4 },
-  statusDot: { width: 6, height: 6, borderRadius: 3 },
-  deviceMetaText: { fontSize: 11, fontWeight: "500" },
-  batteryWrap: { flexDirection: "row", alignItems: "center", gap: 3 },
-  batteryText: { fontSize: 12, fontWeight: "600" },
-  addDeviceBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: radius.md, borderWidth: 1, borderStyle: "dashed" },
-  addDeviceText: { fontSize: 13, fontWeight: "700" },
-  deviceActions: { flexDirection: "column", gap: 4, marginLeft: 4 },
-  deviceActBtn: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  emptyDevices: { alignItems: "center", paddingVertical: spacing.xl, gap: spacing.sm },
-  emptyDevIcon: { width: 56, height: 56, borderRadius: radius.lg, alignItems: "center", justifyContent: "center" },
-
-  /* Logout */
+  // Logout
   logoutSection: { marginBottom: spacing.lg },
   logoutBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 16, borderRadius: radius.lg, borderWidth: 1 },
   logoutText: { fontSize: 16, fontWeight: "700" },
-
-  /* Modals */
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", alignItems: "center", padding: 32 },
-  modalCard: { width: "100%", maxWidth: 360, borderRadius: radius.xl, padding: 24, gap: 16 },
-  modalTitle: { fontSize: 18, fontWeight: "800", textAlign: "center" },
-  modalSubLabel: { fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
-  modalInput: { height: 48, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: 16, fontSize: 15, fontWeight: "600" },
-  typeRow: { flexDirection: "row", gap: 8 },
-  typeBtn: { flex: 1, alignItems: "center", gap: 4, paddingVertical: 12, borderRadius: radius.md, borderWidth: 1.5, borderColor: "rgba(128,128,128,0.15)" },
-  modalBtnRow: { flexDirection: "row", gap: 10, marginTop: 4 },
-  modalBtn: { flex: 1, height: 46, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
 });

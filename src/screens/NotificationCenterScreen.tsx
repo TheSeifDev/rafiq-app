@@ -301,7 +301,7 @@ export function NotificationCenterScreen(): React.JSX.Element {
         navigation.navigate('MainTabs', { screen: 'Medications' });
         break;
       case 'emergency':
-        navigation.navigate('Emergency');
+        navigation.navigate('MainTabs', { screen: 'Emergency' });
         break;
       case 'chat':
         navigation.navigate('MainTabs', { screen: 'Chat' });
@@ -539,6 +539,6 @@ const styles = StyleSheet.create({
 
   // List
   listContent: {
-    paddingBottom: spacing.xl,
+    paddingBottom: 110,
   },
 });

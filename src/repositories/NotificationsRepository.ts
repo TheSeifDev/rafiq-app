@@ -5,6 +5,7 @@
  */
 import { BaseRepository, EntityRow } from './BaseRepository';
 import { runQuery, runStatement, sanitizeBindings } from '../lib/database';
+import { createUuid } from '../utils/uuid';
 
 // ─────────────────────────────────────────
 // Notification DTOs
@@ -93,10 +94,6 @@ export interface AlertRow extends EntityRow {
 // Helpers
 // ─────────────────────────────────────────
 
-function generateLocalId(prefix: string): string {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-}
-
 function getDeviceId(): string {
   return `device_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -160,7 +157,7 @@ export class NotificationRepository extends BaseRepository<NotificationRow, Noti
   }
 
   async createNotification(payload: NotificationInsert): Promise<NotificationRow> {
-    const id = generateLocalId('not');
+    const id = createUuid();
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
 
@@ -238,7 +235,7 @@ export class AlertRepository extends BaseRepository<AlertRow, AlertInsert, Alert
   }
 
   async createAlert(payload: AlertInsert): Promise<AlertRow> {
-    const id = generateLocalId('alert');
+    const id = createUuid();
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
 

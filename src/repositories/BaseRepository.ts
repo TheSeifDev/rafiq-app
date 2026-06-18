@@ -7,6 +7,7 @@
  */
 import { runQuery, runStatement, sanitizeBindings } from '../lib/database';
 import { offlineQueue, SyncPriority } from '../lib/offlineQueue';
+import { createUuid } from '../utils/uuid';
 
 export interface BaseRecord {
   id: string;
@@ -34,10 +35,6 @@ export interface EntityRow {
 }
 
 // Simple ID generator — NOT a UUID, only for local non-sync use
-function generateLocalId(prefix: string): string {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-}
-
 function getDeviceId(): string {
   return `device_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -86,7 +83,7 @@ export abstract class BaseRepository<
     payload: TInsert,
     options?: { priority?: SyncPriority; userId?: string }
   ): Promise<T> {
-    const id = generateLocalId(this.tableName.slice(0, 4));
+    const id = createUuid();
     const created_at = new Date().toISOString();
     const deviceId = getDeviceId();
     const now = created_at;
@@ -129,22 +126,10 @@ export abstract class BaseRepository<
     );
 
     // Enqueue to sync with strict payload
-    const syncPayload: Record<string, unknown> = {
-      id,
-      entity: this.tableName,
-      operation: 'INSERT',
-      payload: row,
-      device_id: deviceId,
-      sync_version: 1,
-      idempotency_key: `sync_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-      created_at: now,
-      updated_at: now,
-    };
-
     await offlineQueue.enqueue({
       table: this.tableName,
       operation: 'INSERT',
-      payload: syncPayload,
+      payload: row,
       recordId: id,
       priority: options?.priority,
       userId: options?.userId,
@@ -196,22 +181,10 @@ export abstract class BaseRepository<
     );
 
     // Enqueue to sync
-    const syncPayload: Record<string, unknown> = {
-      id,
-      entity: this.tableName,
-      operation: 'UPDATE',
-      payload: { ...existing, ...payload, updated_at: now, version: newVersion },
-      device_id: deviceId,
-      sync_version: newVersion,
-      idempotency_key: `sync_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-      created_at: existing.created_at,
-      updated_at: now,
-    };
-
     await offlineQueue.enqueue({
       table: this.tableName,
       operation: 'UPDATE',
-      payload: syncPayload,
+      payload: { ...existing, ...payload, updated_at: now, version: newVersion },
       recordId: id,
       priority: options?.priority,
       userId: options?.userId,

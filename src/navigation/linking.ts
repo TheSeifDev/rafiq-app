@@ -8,13 +8,12 @@ export const linking: LinkingOptions<MainStackParamList> = {
       MainTabs: {
         screens: {
           Home: 'home',
-          Vitals: 'vitals',
+          Emergency: 'emergency',
           Medications: 'medications',
           Chat: 'chat',
           Profile: 'profile',
         },
       },
-      Emergency: 'emergency',
       NotificationCenter: 'notifications',
       NotificationSettings: 'notification-settings',
     },

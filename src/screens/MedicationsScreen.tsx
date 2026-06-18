@@ -707,7 +707,7 @@ const styles = StyleSheet.create({
   list: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
-    paddingBottom: spacing['2xl'],
+    paddingBottom: 110,
   },
   loadingWrap: {
     paddingVertical: spacing['2xl'],

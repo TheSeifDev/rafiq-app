@@ -8,16 +8,16 @@ export const Routes = {
 
   // Main tabs
   Home: 'Home',
-  Vitals: 'Vitals',
   Emergency: 'Emergency',
+  Medications: 'Medications',
   Chat: 'Chat',
   Profile: 'Profile',
 
   // Profile stack
   ProfileMain: 'ProfileMain',
   Settings: 'Settings',
-  Medications: 'Medications',
   EmergencyProfile: 'EmergencyProfile',
+  Food: 'Food',
 } as const;
 
 export type RouteName = (typeof Routes)[keyof typeof Routes];

@@ -1,16 +1,5 @@
-/**
- * HomeScreen - Production-grade healthcare dashboard
- * Refactored with clean architecture, no infinite animations
- */
-import React, { useEffect, useState, useMemo, useCallback } from "react";
-import {
-  ScrollView,
-  View,
-  StyleSheet,
-  TouchableOpacity,
-  RefreshControl,
-  useWindowDimensions,
-} from "react-native";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import type { CompositeScreenProps } from "@react-navigation/native";
@@ -21,67 +10,147 @@ import { spacing, radius } from "../theme";
 import { useTheme } from "../theme/useTheme";
 import { useAuthStore } from "../store/auth.store";
 import { useAppStore } from "../store/app.store";
-import { patientService } from "../services/patient.service";
-import { vitalsService, type VitalsRecord } from "../services/vitals.service";
+import { patientService, type PatientProfile } from "../services/patient.service";
 import { medicationService, type Medication } from "../services/medication.service";
 import { notificationService } from "../services/notification.service";
-import { translations } from "../constants/translations";
-import { recordsToDays, buildWeeklyAnalytics, EMPTY_ANALYTICS } from "../utils/vitalsAnalytics";
 import { formatMedicationTime, parseMedicationTimes } from "../lib/medications/medicationSchedule";
 import type { MainTabParamList, MainStackParamList } from "../navigation/types";
-import {
-  TrendCard,
-  WellnessScoreCard,
-  WeeklyComparison,
-} from "../components/health";
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, "Home">,
   NativeStackScreenProps<MainStackParamList>
 >;
 
+const BOTTOM_SAFE_SPACING = 110;
+
+function getGreeting(isAr: boolean): string {
+  const hour = new Date().getHours();
+  if (isAr) return hour < 12 ? "صباح الخير" : hour < 18 ? "مساء الخير" : "تصبح على صحة";
+  return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+}
+
+function getMedicationTimes(med: Medication): string {
+  const parsed = parseMedicationTimes(med.times, med.time_of_day)
+    .filter((dose) => dose.kind === "time")
+    .map((dose) => dose.kind === "time" ? formatMedicationTime(dose.time) : "");
+  return parsed.length > 0 ? parsed.join(", ") : "--";
+}
+
+function buildNutritionAdvice(profile: PatientProfile | null, meds: Medication[], isAr: boolean): string[] {
+  const hasMeds = meds.length > 0;
+  const hasConditions = Boolean(profile?.condition_type || profile?.risk_level);
+
+  if (isAr) {
+    return [
+      hasConditions ? "اختر وجبات منتظمة ومتوازنة تناسب حالتك الطبية المسجلة." : "حافظ على وجبات متوازنة من البروتين والخضار والحبوب الكاملة.",
+      hasMeds ? "راجع تعليمات الدواء قبل الوجبات أو بعدها كما سجلها الطبيب." : "أضف وجبة خفيفة صحية إذا كانت فتراتك بين الوجبات طويلة.",
+      "اشرب الماء على مدار اليوم، وزد الكمية مع الحرارة أو النشاط.",
+    ];
+  }
+
+  return [
+    hasConditions ? "Choose steady, balanced meals that match your recorded medical profile." : "Build meals around protein, vegetables, and whole grains.",
+    hasMeds ? "Check each medication's meal instructions before taking a dose." : "Use a healthy snack when long gaps between meals affect your energy.",
+    "Keep water nearby and increase intake during heat or activity.",
+  ];
+}
+
+function buildHealthTips(profile: PatientProfile | null, meds: Medication[], isAr: boolean): string[] {
+  const tips: string[] = [];
+  if (meds.length > 0) {
+    tips.push(isAr ? "ثبت أوقات الدواء اليومية لتقليل الجرعات الفائتة." : "Keep medication times consistent to reduce missed doses.");
+  }
+  if (profile?.blood_type) {
+    tips.push(isAr ? "تأكد أن فصيلة الدم محدثة في ملف الطوارئ." : "Make sure your blood type stays current in the emergency profile.");
+  }
+  if (profile?.birth_date || profile?.age) {
+    tips.push(isAr ? "راجع بياناتك الطبية بعد أي زيارة للطبيب." : "Review your medical profile after each doctor visit.");
+  }
+  tips.push(isAr ? "احتفظ بجهة اتصال طوارئ محدثة وسهلة الوصول." : "Keep an emergency contact updated and easy to reach.");
+  return tips;
+}
+
+const SectionCard = memo(function SectionCard({
+  title,
+  children,
+  colors,
+}: {
+  title: string;
+  children: React.ReactNode;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  return (
+    <View style={styles.section}>
+      <AppText style={[styles.sectionTitle, { color: colors.textPrimary }]}>{title}</AppText>
+      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        {children}
+      </View>
+    </View>
+  );
+});
+
+const MedicationRow = memo(function MedicationRow({
+  med,
+  colors,
+  isAr,
+}: {
+  med: Medication;
+  colors: ReturnType<typeof useTheme>["colors"];
+  isAr: boolean;
+}) {
+  return (
+    <View style={[styles.medRow, { borderBottomColor: colors.border }]}>
+      <View style={[styles.medIcon, { backgroundColor: colors.primarySoft }]}>
+        <Ionicons name="medical-outline" size={18} color={colors.primary} />
+      </View>
+      <View style={styles.medBody}>
+        <AppText style={[styles.medName, { color: colors.textPrimary }]} numberOfLines={1}>
+          {med.name}
+        </AppText>
+        <AppText style={[styles.medMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+          {[med.dosage, getMedicationTimes(med)].filter(Boolean).join(" • ")}
+        </AppText>
+      </View>
+      <View style={[styles.statusPill, { backgroundColor: colors.success_soft }]}>
+        <AppText style={[styles.statusText, { color: colors.success }]}>
+          {isAr ? "نشط" : "Active"}
+        </AppText>
+      </View>
+    </View>
+  );
+});
+
 export function HomeScreen({ navigation }: Props): React.JSX.Element {
   const session = useAuthStore((s) => s.session);
-  const { colors, isRTL } = useTheme();
+  const { colors } = useTheme();
   const language = useAppStore((s) => s.language);
-  const t = translations[language];
   const isAr = language === "ar";
-  const { width: screenWidth } = useWindowDimensions();
 
   const [refreshing, setRefreshing] = useState(false);
-  const [patientName, setPatientName] = useState("");
-  const [latestVitals, setLatestVitals] = useState<VitalsRecord | null>(null);
-  const [weekData, setWeekData] = useState(EMPTY_ANALYTICS);
+  const [profile, setProfile] = useState<PatientProfile | null>(null);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // Load data
   const loadData = useCallback(async () => {
-    if (!session?.user.id) return;
-    try {
-      const profile = await patientService.getProfile(session.user.id);
-      if (profile) {
-        setPatientName(profile.full_name ?? "");
-        const [vitals, allVitals, meds, notifs] = await Promise.all([
-          vitalsService.getLatestVitals(profile.id),
-          vitalsService.getVitalsHistory(profile.id, 7),
-          medicationService.getMedications(profile.id),
-          notificationService.getNotifications(session.user.id),
-        ]);
-        setLatestVitals(vitals);
-        setMedications(meds.filter((m) => (m.active ?? m.is_active) !== false));
-        setUnreadCount(notifs.filter((n) => !n.is_read).length);
-        // Build weekly analytics from real records only
-        const days = recordsToDays(allVitals, isAr);
-        setWeekData(buildWeeklyAnalytics(days));
-      }
-    } catch {
-      // Silent fail - production ready
+    const userId = session?.user.id;
+    if (!userId) return;
+    const nextProfile = await patientService.getProfile(userId);
+    setProfile(nextProfile);
+    if (!nextProfile) {
+      setMedications([]);
+      setUnreadCount(0);
+      return;
     }
+    const [meds, notifications] = await Promise.all([
+      medicationService.getMedications(nextProfile.id).catch(() => []),
+      notificationService.getNotifications(userId).catch(() => []),
+    ]);
+    setMedications(meds.filter((med) => (med.active ?? med.is_active) !== false));
+    setUnreadCount(notifications.filter((item) => !item.is_read).length);
   }, [session?.user.id]);
 
   useEffect(() => {
-    loadData();
+    loadData().catch(() => undefined);
   }, [loadData]);
 
   const onRefresh = useCallback(async () => {
@@ -90,543 +159,147 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
     setRefreshing(false);
   }, [loadData]);
 
-  // Derived values
-  const greetingText = useMemo(() => {
-    const hour = new Date().getHours();
-    if (isAr) return hour < 12 ? "صباح الخير" : "مساء الخير";
-    return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  }, [language]);
-
-  const dateStr = useMemo(() => {
-    const d = new Date();
-    return d.toLocaleDateString(isAr ? "ar-EG" : "en-US", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-    });
-  }, [language]);
-
-  const healthStatus = useMemo(() => {
-    if (!latestVitals) {
-      return {
-        label: isAr ? "لا توجد بيانات" : "No data yet",
-        color: colors.textSecondary,
-        icon: "help-circle-outline" as const,
-      };
+  const displayName = profile?.full_name?.trim() || session?.user.email?.split("@")[0] || "Rafiq";
+  const nutritionAdvice = useMemo(() => buildNutritionAdvice(profile, medications, isAr), [profile, medications, isAr]);
+  const healthTips = useMemo(() => buildHealthTips(profile, medications, isAr), [profile, medications, isAr]);
+  const insight = useMemo(() => {
+    if (medications.length > 0) {
+      return isAr
+        ? "بناء على أدويتك المسجلة، حافظ على الماء قريباً وتابع مواعيد الجرعات اليوم."
+        : "Based on your current medications, keep water nearby and stay on track with today's doses.";
     }
-    const hr = latestVitals.heart_rate ?? 75;
-    const spo2 = latestVitals.oxygen_saturation ?? 98;
-    if (hr > 120 || hr < 50 || spo2 < 90) {
-      return {
-        label: isAr ? "يحتاج متابعة" : "Needs attention",
-        color: colors.danger,
-        icon: "warning-outline" as const,
-      };
-    }
-    if (hr > 100 || spo2 < 95) {
-      return {
-        label: isAr ? "مقبول" : "Fair",
-        color: colors.warning,
-        icon: "alert-circle-outline" as const,
-      };
-    }
-    return {
-      label: isAr ? "مستقر" : "Stable",
-      color: colors.success,
-      icon: "checkmark-circle-outline" as const,
-    };
-  }, [latestVitals, isAr, colors]);
-
-  // Week data from real DB records (set in loadData above)
-  const week = weekData;
-
-  const weekDia = useMemo(() => {
-    if (!week.days.length) return 80;
-    const sum = week.days.reduce((acc, d) => acc + d.dia, 0);
-    return Math.round(sum / week.days.length);
-  }, [week]);
-
-  // Vitals cards data
-  const vitalsCards = [
-    {
-      icon: "heart" as const,
-      label: isAr ? "معدل القلب" : "Heart Rate",
-      value: latestVitals?.heart_rate?.toString() ?? "--",
-      unit: isAr ? "ن/د" : "bpm",
-      color: colors.danger,
-      caption: isAr ? "آخر قراءة" : "Latest",
-    },
-    {
-      icon: "fitness" as const,
-      label: isAr ? "ضغط الدم" : "Blood Pressure",
-      value: latestVitals?.blood_pressure_systolic
-        ? `${latestVitals.blood_pressure_systolic}/${latestVitals.blood_pressure_diastolic}`
-        : "--/--",
-      unit: "mmHg",
-      color: colors.primary,
-      caption: isAr ? "انقباض/انبساط" : "Sys/Dia",
-    },
-    {
-      icon: "water" as const,
-      label: isAr ? "الأكسجين" : "Oxygen",
-      value: latestVitals?.oxygen_saturation?.toString() ?? "--",
-      unit: "%",
-      color: colors.success,
-      caption: isAr ? "تشبع" : "SpO2",
-    },
-    {
-      icon: "thermometer" as const,
-      label: isAr ? "الحرارة" : "Temp",
-      value: latestVitals?.temperature?.toString() ?? "--",
-      unit: "°C",
-      color: colors.warning,
-      caption: isAr ? "الجسم" : "Body",
-    },
-  ];
-
-  // Next medication
-  const nextMed = medications[0] ?? null;
-  const nextMedTime = useMemo(() => {
-    if (!nextMed) return null;
-    const first = parseMedicationTimes(nextMed.times, nextMed.time_of_day).find(
-      (dose) => dose.kind === "time"
-    );
-    return first?.kind === "time"
-      ? formatMedicationTime(first.time)
-      : nextMed.time_of_day?.[0] ?? null;
-  }, [nextMed]);
-
-  // Alert flag
-  const showAlert = healthStatus.color === colors.danger;
-
-  // Wellness score — real data only, 0 if no data
-  const wellnessScore = useMemo(() => {
-    if (!latestVitals) return 0; // no fake default score
-    const hrScore = latestVitals.heart_rate
-      ? Math.max(0, 100 - Math.abs(latestVitals.heart_rate - 72) * 2)
-      : 0;
-    const spo2Score = latestVitals.oxygen_saturation
-      ? Math.max(0, (latestVitals.oxygen_saturation - 90) * 10)
-      : 0;
-    const bpScore = latestVitals.blood_pressure_systolic
-      ? Math.max(0, 100 - Math.abs(latestVitals.blood_pressure_systolic - 120) * 1.5)
-      : 0;
-    if (hrScore === 0 && spo2Score === 0 && bpScore === 0) return 0;
-    return Math.round((hrScore + spo2Score + bpScore) / 3);
-  }, [latestVitals]);
-
-  const wellnessInsight = useMemo(() => {
-    if (wellnessScore === 0) return isAr ? "لا توجد بيانات حقيقية بعد" : "No real health data yet";
-    if (wellnessScore >= 80) return isAr ? "حالتك الصحية ممتازة!" : "Your health is excellent!";
-    if (wellnessScore >= 60) return isAr ? "حالتك جيدة بشكل عام" : "Your health is generally good";
-    return isAr ? "ينصح بمتابعة الطبيب" : "Consider consulting your doctor";
-  }, [wellnessScore, isAr]);
-
-  // Trend data
-  const hrTrend = useMemo(() => {
-    const values = week.days.map((d) => d.hr);
-    const recent = values.slice(-3).reduce((a, b) => a + b, 0) / 3;
-    const older = values.slice(0, 3).reduce((a, b) => a + b, 0) / 3;
-    if (recent > older + 5) return "up";
-    if (recent < older - 5) return "down";
-    return "stable";
-  }, [week]);
-
-  const spo2Data = week.days.map((d) => d.spo2);
-  const spo2Trend =
-    spo2Data[spo2Data.length - 1] > spo2Data[0]
-      ? "up"
-      : spo2Data[spo2Data.length - 1] < spo2Data[0]
-        ? "down"
-        : "stable";
+    return isAr
+      ? "أكمل ملفك الطبي لتصبح توصيات رفيق أدق وأكثر فائدة."
+      : "Complete your medical profile so Rafiq can make guidance more personal and useful.";
+  }, [medications.length, isAr]);
 
   return (
     <Screen>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.scroll, { backgroundColor: colors.background }]}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors.primary}
-          />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
-        {/* Header */}
-        <View style={[styles.header, isRTL && styles.rowReverse]}>
-          <View style={{ flex: 1, gap: 2 }}>
+        <View style={styles.header}>
+          <View style={styles.headerText}>
             <AppText style={[styles.greeting, { color: colors.textSecondary }]}>
-              {greetingText}
+              {getGreeting(isAr)}
             </AppText>
-            <AppText
-              style={[styles.heroName, { color: colors.textPrimary }]}
-              numberOfLines={1}
-            >
-              {patientName || t.appName}
+            <AppText style={[styles.heroName, { color: colors.textPrimary }]} numberOfLines={1}>
+              {displayName}
             </AppText>
-            <AppText style={[styles.dateText, { color: colors.textSecondary }]}>
-              {dateStr}
+            <AppText style={[styles.question, { color: colors.textSecondary }]}>
+              {isAr ? "كيف تشعر اليوم؟" : "How are you feeling today?"}
             </AppText>
           </View>
           <TouchableOpacity
             activeOpacity={0.75}
             onPress={() => navigation.navigate("NotificationCenter")}
-            style={[
-              styles.notifBtn,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
+            style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
           >
             <Ionicons name="notifications-outline" size={20} color={colors.textSecondary} />
             {unreadCount > 0 && (
-              <View style={[styles.notifBadge, { backgroundColor: colors.danger }]}>
-                <AppText style={styles.notifBadgeText}>
-                  {unreadCount > 9 ? "9+" : unreadCount}
-                </AppText>
+              <View style={[styles.badge, { backgroundColor: colors.danger }]}>
+                <AppText style={styles.badgeText}>{unreadCount > 9 ? "9+" : unreadCount}</AppText>
               </View>
             )}
           </TouchableOpacity>
         </View>
 
-        {/* Status Card */}
-        <View
-          style={[
-            styles.statusCard,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
-          <View style={[styles.statusLeft, isRTL && styles.rowReverse]}>
-            <View
-              style={[styles.statusIconWrap, { backgroundColor: healthStatus.color + "18" }]}
-            >
-              <Ionicons name={healthStatus.icon} size={22} color={healthStatus.color} />
+        <SectionCard title={isAr ? "رؤية رفيق" : "AI Insight"} colors={colors}>
+          <View style={styles.insightRow}>
+            <View style={[styles.insightIcon, { backgroundColor: colors.primarySoft }]}>
+              <Ionicons name="sparkles-outline" size={20} color={colors.primary} />
             </View>
-            <View style={{ gap: 2 }}>
-              <AppText style={[styles.statusHeading, { color: colors.textSecondary }]}>
-                {isAr ? "الحالة الصحية" : "Health Status"}
-              </AppText>
-              <AppText style={[styles.statusValue, { color: healthStatus.color }]}>
-                {healthStatus.label}
-              </AppText>
-            </View>
-          </View>
-          <TouchableOpacity
-            activeOpacity={0.75}
-            onPress={() => navigation.navigate("Emergency")}
-            style={[
-              styles.emergencyBtn,
-              { backgroundColor: colors.danger + "14", borderColor: colors.danger + "30" },
-            ]}
-          >
-            <Ionicons name="shield-checkmark-outline" size={16} color={colors.danger} />
-            <AppText style={[styles.emergencyBtnText, { color: colors.danger }]}>
-              {isAr ? "طوارئ" : "SOS"}
-            </AppText>
-          </TouchableOpacity>
-        </View>
-
-        {/* Alert Banner */}
-        {showAlert && (
-          <View
-            style={[
-              styles.alertBanner,
-              { backgroundColor: colors.danger + "12", borderColor: colors.danger + "30" },
-            ]}
-          >
-            <Ionicons name="warning" size={16} color={colors.danger} />
-            <AppText style={[styles.alertText, { color: colors.danger }]}>
-              {isAr
-                ? "بعض المؤشرات تحتاج انتباهاً — راجع طبيبك."
-                : "Some vitals need attention — please consult your doctor."}
+            <AppText style={[styles.insightText, { color: colors.textPrimary }]}>
+              {insight}
             </AppText>
           </View>
-        )}
+        </SectionCard>
 
-        {/* Vitals Snapshot */}
-        <View style={styles.sectionRow}>
-          <AppText style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-            {t.healthSummary}
-          </AppText>
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => navigation.navigate("Vitals")}
-          >
-            <AppText style={[styles.sectionLink, { color: colors.primary }]}>
-              {isAr ? "كل المقاسات" : "All readings"}
-            </AppText>
-          </TouchableOpacity>
-        </View>
-        <View
-          style={[
-            styles.vitalsPanel,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
-          <View style={[styles.vitalsPanelTop, isRTL && styles.rowReverse]}>
-            <View style={{ flex: 1, gap: 2 }}>
-              <AppText style={[styles.vitalsPanelTitle, { color: colors.textPrimary }]}>
-                {healthStatus.label}
-              </AppText>
-              <AppText style={[styles.vitalsPanelSub, { color: colors.textSecondary }]}>
-                {latestVitals?.recorded_at
-                  ? new Date(latestVitals.recorded_at).toLocaleString(
-                      isAr ? "ar-EG" : "en-US",
-                      {
-                        hour: "numeric",
-                        minute: "2-digit",
-                        month: "short",
-                        day: "numeric",
-                      }
-                    )
-                  : t.noData}
-              </AppText>
-            </View>
-            <View
-              style={[
-                styles.vitalsSignal,
-                { backgroundColor: healthStatus.color + "16", borderColor: healthStatus.color + "35" },
-              ]}
-            >
-              <Ionicons name={healthStatus.icon} size={18} color={healthStatus.color} />
-            </View>
-          </View>
-          <View style={styles.vitalsGrid}>
-            {vitalsCards.map((card, index) => (
-              <View
-                key={index}
-                style={[
-                  styles.snapCard,
-                  { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
-                ]}
-              >
-                <View style={[styles.snapTop, isRTL && styles.rowReverse]}>
-                  <View style={[styles.snapIcon, { backgroundColor: card.color + "14" }]}>
-                    <Ionicons name={card.icon} size={17} color={card.color} />
-                  </View>
-                  <AppText style={[styles.snapCaption, { color: colors.textSecondary }]}>
-                    {card.caption}
-                  </AppText>
-                </View>
-                <AppText style={[styles.snapLabel, { color: colors.textSecondary }]}>
-                  {card.label}
-                </AppText>
-                <View style={[styles.snapValueRow, isRTL && styles.rowReverse]}>
-                  <AppText style={[styles.snapValue, { color: colors.textPrimary }]}>
-                    {card.value}
-                  </AppText>
-                  <AppText style={[styles.snapUnit, { color: colors.textSecondary }]}>
-                    {card.unit}
-                  </AppText>
-                </View>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* Weekly Trends Section */}
-        <View style={styles.sectionRow}>
-          <AppText style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-            {t.weeklyTrend}
-          </AppText>
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() =>
-              navigation.navigate("MainTabs", {
-                screen: "Profile",
-                params: { screen: "WeeklyTrends" },
-              })
-            }
-          >
-            <AppText style={[styles.sectionLink, { color: colors.primary }]}>
-              {isAr ? "التفاصيل" : "Details"}
-            </AppText>
-          </TouchableOpacity>
-        </View>
-
-        {/* Wellness Score Card */}
-        <WellnessScoreCard
-          score={wellnessScore}
-          label={isAr ? "مؤشر الصحة" : "Wellness Score"}
-          insight={wellnessInsight}
-          isRTL={isAr}
-          colors={colors}
-        />
-
-        {/* Trend Cards Grid */}
-        <View style={styles.trendsGrid}>
-          <TrendCard
-            title={isAr ? "معدل القلب" : "Heart Rate"}
-            icon="heart"
-            iconColor={colors.danger}
-            value={String(week.hr.avg)}
-            unit={isAr ? "ن/د" : "bpm"}
-            trend={hrTrend}
-            trendLabel={
-              isAr
-                ? hrTrend === "up"
-                  ? "مرتفع"
-                  : hrTrend === "down"
-                    ? "منخفض"
-                    : "مستقر"
-                : hrTrend === "up"
-                  ? "High"
-                  : hrTrend === "down"
-                    ? "Low"
-                    : "Stable"
-            }
-            data={week.days.map((d) => d.hr)}
-            backgroundColor={colors.danger + "15"}
-            isRTL={isAr}
-            colors={colors}
-          />
-          <TrendCard
-            title={isAr ? "الأكسجين" : "SpO2"}
-            icon="water"
-            iconColor={colors.success}
-            value={week.spo2.avg.toString()}
-            unit="%"
-            trend={spo2Trend}
-            trendLabel={
-              isAr
-                ? spo2Trend === "up"
-                  ? "مرتفع"
-                  : spo2Trend === "down"
-                    ? "منخفض"
-                    : "مستقر"
-                : spo2Trend === "up"
-                  ? "High"
-                  : spo2Trend === "down"
-                    ? "Low"
-                    : "Stable"
-            }
-            data={spo2Data}
-            backgroundColor={colors.success + "15"}
-            isRTL={isAr}
-            colors={colors}
-          />
-          <TrendCard
-            title={isAr ? "ضغط الدم" : "Blood Pressure"}
-            icon="fitness"
-            iconColor={colors.primary}
-            value={`${week.sys.avg}/${weekDia}`}
-            unit="mmHg"
-            trend="stable"
-            trendLabel={isAr ? "مستقر" : "Stable"}
-            data={week.days.map((d) => d.sys)}
-            backgroundColor={colors.primary + "15"}
-            isRTL={isAr}
-            colors={colors}
-          />
-          <TrendCard
-            title={isAr ? "درجة الحرارة" : "Temperature"}
-            icon="thermometer"
-            iconColor={colors.warning}
-            value={latestVitals?.temperature != null ? String(latestVitals.temperature) : '--'}
-            unit="°C"
-            trend="stable"
-            trendLabel={isAr ? "مستقر" : "Stable"}
-            data={week.days.length > 0 ? week.days.map((d) => d.temp).filter(v => v > 0) : [0]}
-            backgroundColor={colors.warning + "15"}
-            isRTL={isAr}
-            colors={colors}
-          />
-        </View>
-
-        {/* Weekly Comparison */}
-        <WeeklyComparison isRTL={isAr} colors={colors} />
-
-        {/* Today's Plan */}
-        <View style={styles.sectionRow}>
-          <AppText style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-            {t.todayMeds}
-          </AppText>
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => navigation.navigate("Medications")}
-          >
-            <AppText style={[styles.sectionLink, { color: colors.primary }]}>
-              {t.viewAll}
-            </AppText>
-          </TouchableOpacity>
-        </View>
-        {nextMed ? (
-          <View
-            style={[
-              styles.planCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <View style={[styles.planIcon, { backgroundColor: colors.success + "14" }]}>
-              <Ionicons name="medical" size={20} color={colors.success} />
-            </View>
-            <View style={{ flex: 1, gap: 3 }}>
-              <AppText style={[styles.planTitle, { color: colors.textPrimary }]}>
-                {nextMed.name}
-              </AppText>
-              <AppText style={[styles.planSub, { color: colors.textSecondary }]}>
-                {nextMed.dosage} · {nextMed.frequency}
-              </AppText>
-            </View>
-            {nextMedTime && (
-              <View style={[styles.timeBadge, { backgroundColor: colors.primary + "12" }]}>
-                <AppText style={[styles.timeText, { color: colors.primary }]}>
-                  {nextMedTime}
-                </AppText>
-              </View>
-            )}
-          </View>
-        ) : (
-          <View
-            style={[
-              styles.emptyPlan,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Ionicons name="medical-outline" size={28} color={colors.textSecondary + "60"} />
+        <SectionCard title={isAr ? "أدوية اليوم" : "Today's Medications"} colors={colors}>
+          {medications.length > 0 ? (
+            medications.slice(0, 4).map((med, index) => (
+              <MedicationRow key={med.id} med={med} colors={colors} isAr={isAr} />
+            ))
+          ) : (
             <AppText style={[styles.emptyText, { color: colors.textSecondary }]}>
-              {t.noMedsToday}
+              {isAr ? "لا توجد أدوية نشطة مسجلة." : "No active medications recorded."}
             </AppText>
-          </View>
-        )}
+          )}
+          <TouchableOpacity onPress={() => navigation.navigate("Medications")} style={styles.linkRow}>
+            <AppText style={[styles.linkText, { color: colors.primary }]}>
+              {isAr ? "إدارة الأدوية" : "Manage medications"}
+            </AppText>
+            <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+          </TouchableOpacity>
+        </SectionCard>
 
-        <View style={{ height: spacing["2xl"] }} />
+        <SectionCard title={isAr ? "دليل التغذية" : "Nutrition Guide"} colors={colors}>
+          {nutritionAdvice.map((item) => (
+            <View key={item} style={styles.bulletRow}>
+              <View style={[styles.dot, { backgroundColor: colors.success }]} />
+              <AppText style={[styles.bulletText, { color: colors.textPrimary }]}>{item}</AppText>
+            </View>
+          ))}
+        </SectionCard>
+
+        <SectionCard title={isAr ? "نصائح صحية" : "Health Tips"} colors={colors}>
+          {healthTips.map((item) => (
+            <View key={item} style={styles.bulletRow}>
+              <View style={[styles.dot, { backgroundColor: colors.warning }]} />
+              <AppText style={[styles.bulletText, { color: colors.textPrimary }]}>{item}</AppText>
+            </View>
+          ))}
+        </SectionCard>
+
+        <SectionCard title={isAr ? "إجراءات طوارئ سريعة" : "Emergency Quick Actions"} colors={colors}>
+          <View style={styles.quickActions}>
+            <TouchableOpacity onPress={() => navigation.navigate("Emergency")} style={[styles.quickButton, { borderColor: colors.border }]}>
+              <Ionicons name="call-outline" size={20} color={colors.danger} />
+              <AppText style={[styles.quickText, { color: colors.textPrimary }]}>
+                {isAr ? "جهات الطوارئ" : "Emergency Contacts"}
+              </AppText>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate("MainTabs", { screen: "Profile", params: { screen: "EmergencyProfile" } })} style={[styles.quickButton, { borderColor: colors.border }]}>
+              <Ionicons name="id-card-outline" size={20} color={colors.primary} />
+              <AppText style={[styles.quickText, { color: colors.textPrimary }]}>
+                {isAr ? "ملف الطوارئ" : "Emergency Profile"}
+              </AppText>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate("Emergency")} style={[styles.quickButton, { borderColor: colors.border }]}>
+              <Ionicons name="help-buoy-outline" size={20} color={colors.warning} />
+              <AppText style={[styles.quickText, { color: colors.textPrimary }]}>
+                {isAr ? "مساعدة سريعة" : "Quick Help"}
+              </AppText>
+            </TouchableOpacity>
+          </View>
+        </SectionCard>
+
+        <View style={{ height: BOTTOM_SAFE_SPACING }} />
       </ScrollView>
     </Screen>
   );
 }
 
-// Styles
 const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.xl,
   },
-  rowReverse: {
-    flexDirection: "row-reverse",
-  },
   header: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: spacing.md,
     marginBottom: spacing.lg,
-    gap: spacing.sm,
   },
-  greeting: {
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  heroName: {
-    fontSize: 24,
-    fontWeight: "800",
-    letterSpacing: -0.4,
-  },
-  dateText: {
-    fontSize: 12,
-    fontWeight: "500",
-    marginTop: 2,
-  },
-  notifBtn: {
+  headerText: { flex: 1, gap: 3 },
+  greeting: { fontSize: 14, fontWeight: "600" },
+  heroName: { fontSize: 28, fontWeight: "800", letterSpacing: 0 },
+  question: { fontSize: 15, fontWeight: "500" },
+  iconButton: {
     width: 44,
     height: 44,
     borderRadius: radius.md,
@@ -634,7 +307,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  notifBadge: {
+  badge: {
     position: "absolute",
     top: -3,
     right: -3,
@@ -645,210 +318,58 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 3,
   },
-  notifBadgeText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  statusCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: spacing.md,
-    borderRadius: radius.lg,
+  badgeText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" },
+  section: { marginBottom: spacing.lg },
+  sectionTitle: { fontSize: 17, fontWeight: "800", marginBottom: spacing.sm },
+  card: {
     borderWidth: 1,
-    marginBottom: spacing.md,
+    borderRadius: radius.xl,
+    padding: spacing.md,
+    gap: spacing.md,
   },
-  statusLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  statusIconWrap: {
+  insightRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
+  insightIcon: {
     width: 40,
     height: 40,
-    borderRadius: 13,
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
   },
-  statusHeading: {
-    fontSize: 11,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  statusValue: {
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  emergencyBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: radius.full,
-    borderWidth: 1,
-  },
-  emergencyBtnText: {
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  alertBanner: {
+  insightText: { flex: 1, fontSize: 15, lineHeight: 22, fontWeight: "600" },
+  medRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    marginBottom: spacing.md,
+    paddingBottom: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  alertText: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: "500",
-    lineHeight: 20,
-  },
-  sectionRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: spacing.sm,
-    marginTop: spacing.md,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  sectionLink: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  vitalsPanel: {
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: spacing.md,
-    gap: spacing.md,
-    marginBottom: spacing.md,
-  },
-  vitalsPanelTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  vitalsPanelTitle: {
-    fontSize: 17,
-    fontWeight: "800",
-  },
-  vitalsPanelSub: {
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  vitalsSignal: {
+  medIcon: {
     width: 38,
     height: 38,
-    borderRadius: 13,
-    borderWidth: 1,
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
   },
-  vitalsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  snapCard: {
-    width: "48%",
-    minWidth: 140,
-    flexGrow: 1,
+  medBody: { flex: 1 },
+  medName: { fontSize: 15, fontWeight: "800" },
+  medMeta: { fontSize: 12, fontWeight: "600", marginTop: 2 },
+  statusPill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.full },
+  statusText: { fontSize: 11, fontWeight: "800" },
+  emptyText: { fontSize: 14, lineHeight: 20 },
+  linkRow: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 2 },
+  linkText: { fontSize: 14, fontWeight: "800" },
+  bulletRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
+  dot: { width: 7, height: 7, borderRadius: 4, marginTop: 7 },
+  bulletText: { flex: 1, fontSize: 14, lineHeight: 21, fontWeight: "600" },
+  quickActions: { gap: spacing.sm },
+  quickButton: {
+    minHeight: 48,
     borderRadius: radius.md,
     borderWidth: 1,
-    padding: spacing.md,
-    gap: 7,
-  },
-  snapTop: {
+    paddingHorizontal: spacing.md,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     gap: spacing.sm,
   },
-  snapIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  snapCaption: {
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  snapLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  snapValueRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: 4,
-  },
-  snapValue: {
-    fontSize: 23,
-    fontWeight: "900",
-    letterSpacing: 0,
-  },
-  snapUnit: {
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  trendsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  planCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-  },
-  planIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  planTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  planSub: {
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  timeBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: radius.sm,
-  },
-  timeText: {
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  emptyPlan: {
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.xl,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    gap: spacing.sm,
-  },
-  emptyText: {
-    fontSize: 14,
-    fontWeight: "500",
-  },
+  quickText: { flex: 1, fontSize: 14, fontWeight: "800" },
 });

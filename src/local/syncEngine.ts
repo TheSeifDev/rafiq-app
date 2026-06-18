@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { all, createUuid, jsonString, parseJson, run } from './db';
 import { allowedTables, logSync, normalizeForSqlite } from './repository';
+import { isUuid } from '../utils/uuid';
 
 type PendingSyncRow = {
   id: string;
@@ -81,6 +82,21 @@ const UPDATED_AT_TABLES = new Set([
   'ai_personality',
 ]);
 
+const UUID_REFERENCE_COLUMNS = new Set([
+  'id',
+  'user_id',
+  'patient_id',
+  'medication_id',
+  'notification_id',
+  'conversation_id',
+  'reminder_id',
+  'wearable_id',
+  'vitals_reading_id',
+  'smart_home_device_id',
+  'source_message_id',
+  'emergency_event_id',
+]);
+
 function nextRetryIso(attempts: number): string {
   const seconds = Math.min(300, Math.pow(2, attempts) * 5);
   return new Date(Date.now() + seconds * 1000).toISOString();
@@ -126,6 +142,16 @@ async function pushOne(item: PendingSyncRow): Promise<void> {
   }
 
   const payload = parseJson<Record<string, unknown>>(item.payload, {});
+  if (!isUuid(item.record_id)) {
+    throw new Error(`Refusing to sync ${item.table_name}: record id is not a UUID`);
+  }
+  for (const [key, value] of Object.entries(payload)) {
+    if (!UUID_REFERENCE_COLUMNS.has(key) || value == null) continue;
+    if (typeof value === 'string' && value.trim() === '') continue;
+    if (!isUuid(value)) {
+      throw new Error(`Refusing to sync ${item.table_name}: ${key} is not a UUID`);
+    }
+  }
 
   if (item.operation === 'delete') {
     const { error } = await supabase.from(item.table_name).delete().eq('id', item.record_id);

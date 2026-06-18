@@ -1,325 +1,501 @@
-import React, { useCallback, useMemo } from 'react';
+/**
+ * EmergencyScreen — Full Emergency Dashboard
+ *
+ * Standalone tab screen containing:
+ * - SOS call button (997)
+ * - Emergency contacts (from patient profile)
+ * - Quick call grid (Ambulance · Police · Fire · Health)
+ * - Active alerts / recent emergency notifications
+ * - Gas / Fall detection status
+ * - Emergency protocol status (profile completeness)
+ * - Share location
+ * - First Aid Guide
+ *
+ * Supports dark/light theme, RTL/LTR, and Expo Go.
+ */
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Linking,
   ScrollView,
   View,
   StyleSheet,
   TouchableOpacity,
-  useWindowDimensions,
   Vibration,
   Platform,
   Share,
-} from 'react-native';
-import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
-import { AppCard } from '../components/ui/AppCard';
-import { AppText } from '../components/ui/AppText';
-import { Screen } from '../components/ui/Screen';
-import { useLocale } from '../hooks/useLocale';
+  RefreshControl,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { AppText } from "../components/ui/AppText";
+import { Screen } from "../components/ui/Screen";
+import { useTheme } from "../theme/useTheme";
+import { useAppStore } from "../store/app.store";
+import { useAuthStore } from "../store/auth.store";
+import { patientService } from "../services/patient.service";
+import { notificationService } from "../services/notification.service";
+import { checkProfileCompleteness } from "../services/profileCompletionChecker";
+import { spacing, radius } from "../theme";
 
-const C = {
-  bg: '#0A0F1C',
-  surface: '#111827',
-  card: '#1A2332',
-  cardBorder: 'rgba(255,255,255,0.06)',
-  text: '#F1F5F9',
-  textMuted: '#94A3B8',
-  danger: '#FF3B3B',
-  dangerLight: '#FF6B6B',
-  warning: '#F59E0B',
-  info: '#00C2FF',
-  success: '#10B981',
-  purple: '#A78BFA',
-};
+// ─── Constants ───────────────────────────────────────────────
 
-type IconType = 'ion' | 'fa';
-type TranslationKey = keyof typeof translations.en;
+const BOTTOM_SAFE_SPACING = 110;
 
-const translations = {
-  en: {
-    emergencyTitle: 'Emergency',
-    emergencySubtitle: 'Quick access to emergency services',
-    sos: 'SOS Emergency',
-    sosDesc: 'Tap to call Ambulance immediately',
-    firstAidTitle: 'First Aid Guide',
-    firstAidSubtitle: 'Step-by-step emergency instructions',
-    call: 'Call',
-    shareLocation: 'Share My Location',
-    cpr: 'CPR',
-    cprDesc: 'Push hard and fast in the center of the chest.',
-    cprStep1: 'Check responsiveness',
-    cprStep2: 'Call 997',
-    cprStep3: 'Push 100-120/min',
-    breathing: 'Breathing',
-    breathingDesc: 'Sit upright and loosen tight clothing.',
-    breathingStep1: 'Sit upright',
-    breathingStep2: 'Loosen clothing',
-    breathingStep3: 'Call if severe',
-    faint: 'Fainting',
-    faintDesc: 'Lay flat and elevate legs.',
-    faintStep1: 'Lay on back',
-    faintStep2: 'Elevate legs',
-    faintStep3: 'Fresh air',
-    bleeding: 'Bleeding',
-    bleedingDesc: 'Apply firm pressure with clean cloth.',
-    bleedingStep1: 'Apply pressure',
-    bleedingStep2: 'Use clean cloth',
-    bleedingStep3: 'Elevate limb',
-    burn: 'Burns',
-    burnDesc: 'Cool under running water.',
-    burnStep1: 'Cool with water',
-    burnStep2: '10-20 minutes',
-    burnStep3: 'Cover loosely',
-    poison: 'Poison',
-    poisonDesc: 'Do not induce vomiting.',
-    poisonStep1: 'Do not vomit',
-    poisonStep2: 'Call 997',
-    poisonStep3: 'Keep container',
-    shock: 'Shock',
-    shockDesc: 'Keep warm and lying down.',
-    shockStep1: 'Keep warm',
-    shockStep2: 'Lay flat',
-    shockStep3: 'Elevate legs',
-    ambulance: 'Ambulance',
-    police: 'Police',
-    fire: 'Fire Dept',
-    health: 'Health Line',
-    steps: 'Steps',
-  },
+// ─── Translations ─────────────────────────────────────────────
+
+const T = {
   ar: {
-    emergencyTitle: 'الطوارئ',
-    emergencySubtitle: 'وصول سريع لخدمات الطوارئ',
-    sos: 'طوارئ SOS',
-    sosDesc: 'اضغط للاتصال بالإسعاف فوراً',
-    firstAidTitle: 'دليل الإسعافات',
-    firstAidSubtitle: 'تعليمات طوارئ خطوة بخطوة',
-    call: 'اتصال',
-    shareLocation: 'مشاركة موقعي',
-    cpr: 'الإنعاش',
-    cprDesc: 'اضغط بقوة وسرعة في منتصف الصدر.',
-    cprStep1: 'تأكد من الاستجابة',
-    cprStep2: 'اتصل 997',
-    cprStep3: 'اضغط 100-120/د',
-    breathing: 'التنفس',
-    breathingDesc: 'اجلس مستقيماً وفك الملابس.',
-    breathingStep1: 'اجلس مستقيماً',
-    breathingStep2: 'فك الملابس',
-    breathingStep3: 'اتصل إن كان حاداً',
-    faint: 'الإغماء',
-    faintDesc: 'اضبط مستلقياً وارفع الساقين.',
-    faintStep1: 'على الظهر',
-    faintStep2: 'ارفع الساقين',
-    faintStep3: 'هواء نقي',
-    bleeding: 'النزيف',
-    bleedingDesc: 'اضغط بقوة بقماش نظيف.',
-    bleedingStep1: 'اضغط بقوة',
-    bleedingStep2: 'قماش نظيف',
-    bleedingStep3: 'ارفع العضو',
-    burn: 'الحروق',
-    burnDesc: 'برد بالماء الجاري.',
-    burnStep1: 'برد بالماء',
-    burnStep2: '10-20 دقيقة',
-    burnStep3: 'غطّ بشكل فضفاض',
-    poison: 'التسمم',
-    poisonDesc: 'لا تحاول إحداث القيء.',
-    poisonStep1: 'لا قيء',
-    poisonStep2: 'اتصل 997',
-    poisonStep3: 'احتفظ بالعبوة',
-    shock: 'الصدمة',
-    shockDesc: 'حافظ على الدفء والاستلقاء.',
-    shockStep1: 'حافظ على الدفء',
-    shockStep2: 'مستلقي',
-    shockStep3: 'ارفع الساقين',
-    ambulance: 'إسعاف',
-    police: 'شرطة',
-    fire: 'دفاع مدني',
-    health: 'الاستشارات',
-    steps: 'الخطوات',
+    title: "مركز الطوارئ",
+    subtitle: "وصول سريع · استجابة فورية",
+    sos: "طوارئ SOS",
+    sosDesc: "اضغط للاتصال بالإسعاف فوراً",
+    shareLocation: "مشاركة موقعي",
+    ambulance: "إسعاف",
+    police: "شرطة",
+    fire: "دفاع مدني",
+    health: "الاستشارات",
+    call: "اتصال",
+    contacts: "جهات الاتصال الطارئة",
+    noContacts: "لم تُضَف جهات اتصال طوارئ بعد",
+    addContacts: "أضف جهات اتصال",
+    activeAlerts: "التنبيهات النشطة",
+    noAlerts: "لا توجد تنبيهات نشطة",
+    gasStatus: "حالة كشف الغاز",
+    gasNormal: "لا توجد تسربات مكتشفة",
+    fallStatus: "حالة كشف السقوط",
+    fallNormal: "لا توجد حوادث سقوط",
+    protocolStatus: "حالة بروتوكول الطوارئ",
+    profileComplete: "ملفك الطبي مكتمل",
+    profileIncomplete: "ملفك الطبي غير مكتمل",
+    profileIncompleteDesc: "أكمل ملفك لتفعيل الحماية الكاملة",
+    completeNow: "أكمل الآن",
+    firstAidTitle: "دليل الإسعافات الأولية",
+    firstAidSubtitle: "خطوات طوارئ سريعة",
+    steps: "الخطوات",
+    cpr: "الإنعاش القلبي",
+    cprStep1: "تأكد من الاستجابة",
+    cprStep2: "اتصل 997",
+    cprStep3: "اضغط 100-120/دقيقة",
+    bleeding: "النزيف",
+    bleedingStep1: "اضغط بقوة",
+    bleedingStep2: "قماش نظيف",
+    bleedingStep3: "ارفع العضو",
+    faint: "الإغماء",
+    faintStep1: "مستلقي على الظهر",
+    faintStep2: "ارفع الساقين",
+    faintStep3: "هواء نقي",
+    burn: "الحروق",
+    burnStep1: "برد بالماء الجاري",
+    burnStep2: "10–20 دقيقة",
+    burnStep3: "غطّ بشكل فضفاض",
   },
-};
+  en: {
+    title: "Emergency Center",
+    subtitle: "Quick access · Instant response",
+    sos: "SOS Emergency",
+    sosDesc: "Tap to call Ambulance immediately",
+    shareLocation: "Share My Location",
+    ambulance: "Ambulance",
+    police: "Police",
+    fire: "Fire Dept",
+    health: "Health Line",
+    call: "Call",
+    contacts: "Emergency Contacts",
+    noContacts: "No emergency contacts added yet",
+    addContacts: "Add contacts",
+    activeAlerts: "Active Alerts",
+    noAlerts: "No active alerts",
+    gasStatus: "Gas Detection Status",
+    gasNormal: "No gas leaks detected",
+    fallStatus: "Fall Detection Status",
+    fallNormal: "No fall incidents detected",
+    protocolStatus: "Emergency Protocol Status",
+    profileComplete: "Medical profile is complete",
+    profileIncomplete: "Medical profile incomplete",
+    profileIncompleteDesc: "Complete your profile to enable full protection",
+    completeNow: "Complete Now",
+    firstAidTitle: "First Aid Guide",
+    firstAidSubtitle: "Step-by-step emergency instructions",
+    steps: "Steps",
+    cpr: "CPR",
+    cprStep1: "Check responsiveness",
+    cprStep2: "Call 997",
+    cprStep3: "Push 100-120/min",
+    bleeding: "Bleeding",
+    bleedingStep1: "Apply firm pressure",
+    bleedingStep2: "Use clean cloth",
+    bleedingStep3: "Elevate the limb",
+    faint: "Fainting",
+    faintStep1: "Lay flat on back",
+    faintStep2: "Elevate legs",
+    faintStep3: "Fresh air",
+    burn: "Burns",
+    burnStep1: "Cool under running water",
+    burnStep2: "10–20 minutes",
+    burnStep3: "Cover loosely",
+  },
+} as const;
 
-type EmergencyItem = {
+type Lang = "ar" | "en";
+
+// ─── Quick Call Data ──────────────────────────────────────────
+
+interface QuickCall {
   number: string;
+  labelKey: keyof (typeof T)["en"];
   icon: string;
-  iconType: IconType;
   color: string;
-  bg: string;
-  labelKey: TranslationKey;
-};
+}
 
-type FirstAidItem = {
+const QUICK_CALLS: QuickCall[] = [
+  { number: "997", labelKey: "ambulance", icon: "medkit", color: "#FF3B3B" },
+  { number: "998", labelKey: "police", icon: "shield-checkmark", color: "#F59E0B" },
+  { number: "999", labelKey: "fire", icon: "flame", color: "#FF6B6B" },
+  { number: "920033333", labelKey: "health", icon: "call", color: "#00C2FF" },
+];
+
+// ─── First Aid Data ───────────────────────────────────────────
+
+interface FirstAidCard {
+  titleKey: keyof (typeof T)["en"];
   icon: string;
-  iconType: IconType;
   color: string;
-  bg: string;
-  titleKey: TranslationKey;
-  descKey: TranslationKey;
-  steps: TranslationKey[];
-};
+  steps: [keyof (typeof T)["en"], keyof (typeof T)["en"], keyof (typeof T)["en"]];
+}
+
+const FIRST_AID_CARDS: FirstAidCard[] = [
+  { titleKey: "cpr", icon: "heart", color: "#FF3B3B", steps: ["cprStep1", "cprStep2", "cprStep3"] },
+  { titleKey: "bleeding", icon: "water", color: "#EF4444", steps: ["bleedingStep1", "bleedingStep2", "bleedingStep3"] },
+  { titleKey: "faint", icon: "person", color: "#A78BFA", steps: ["faintStep1", "faintStep2", "faintStep3"] },
+  { titleKey: "burn", icon: "flame", color: "#F59E0B", steps: ["burnStep1", "burnStep2", "burnStep3"] },
+];
+
+// ─── Sub-components ───────────────────────────────────────────
+
+function SectionHeader({ title, icon, iconColor, colors }: {
+  title: string; icon: string; iconColor: string; colors: any;
+}) {
+  return (
+    <View style={styles.sectionHeader}>
+      <View style={[styles.sectionIcon, { backgroundColor: iconColor + "18" }]}>
+        <Ionicons name={icon as any} size={18} color={iconColor} />
+      </View>
+      <AppText style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+        {title}
+      </AppText>
+    </View>
+  );
+}
+
+function StatusCard({ icon, iconColor, label, sublabel, isOk, colors }: {
+  icon: string; iconColor: string; label: string; sublabel: string; isOk: boolean; colors: any;
+}) {
+  const dotColor = isOk ? colors.success : colors.danger;
+  return (
+    <View style={[styles.statusCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View style={[styles.statusIconWrap, { backgroundColor: iconColor + "14" }]}>
+        <Ionicons name={icon as any} size={22} color={iconColor} />
+      </View>
+      <View style={styles.statusText}>
+        <AppText style={[styles.statusLabel, { color: colors.textPrimary }]}>{label}</AppText>
+        <AppText style={[styles.statusSub, { color: colors.textSecondary }]}>{sublabel}</AppText>
+      </View>
+      <View style={[styles.statusDot, { backgroundColor: dotColor }]} />
+    </View>
+  );
+}
+
+// ─── Main Screen ─────────────────────────────────────────────
 
 export function EmergencyScreen(): React.JSX.Element {
-  const { isRTL } = useLocale();
-  const { width } = useWindowDimensions();
-  const lang = isRTL ? 'ar' : 'en';
-  const t = useCallback((k: TranslationKey) => translations[lang][k], [lang]);
+  const { colors, darkMode } = useTheme();
+  const language = useAppStore((s) => s.language);
+  const session = useAuthStore((s) => s.session);
+  const isAr = language === "ar";
+  const lang: Lang = isAr ? "ar" : "en";
+  const t = T[lang];
+  const insets = useSafeAreaInsets();
 
-  const handleCall = (num: string) => {
-    Vibration.vibrate(Platform.OS === 'ios' ? [0, 40] : 40);
+  let tabH = 0;
+  try { tabH = useBottomTabBarHeight(); } catch { tabH = Platform.OS === "ios" ? 83 : 62; }
+  const bottomSpacing = tabH + insets.bottom + 16;
+
+  const [refreshing, setRefreshing] = useState(false);
+  const [emergencyContacts, setEmergencyContacts] = useState<any[]>([]);
+  const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
+  const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
+
+  const loadData = useCallback(async () => {
+    if (!session?.user.id) return;
+    try {
+      const profile = await patientService.getProfile(session.user.id);
+      if (profile) {
+        const [contacts, notifications] = await Promise.all([
+          patientService.getEmergencyContacts(profile.id),
+          notificationService.getNotifications(session.user.id),
+        ]);
+        setEmergencyContacts(contacts ?? []);
+
+        // Show last 3 emergency-type notifications
+        const emergencyNotifs = notifications
+          .filter((n: any) => n.category === "emergency" || n.severity === "critical")
+          .slice(0, 3);
+        setRecentAlerts(emergencyNotifs);
+
+        // Profile completeness
+        const result = checkProfileCompleteness(
+          { profile, emergencyContacts: contacts ?? [] },
+          lang,
+        );
+        setProfileComplete(result.isComplete);
+      }
+    } catch {
+      // silent fail
+    }
+  }, [session?.user.id, lang]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+  }, [loadData]);
+
+  const handleCall = useCallback((num: string) => {
+    Vibration.vibrate(Platform.OS === "ios" ? [0, 40] : 40);
     Linking.openURL(`tel:${num}`);
-  };
+  }, []);
 
-  const handleShare = async () => {
+  const handleShare = useCallback(async () => {
     try {
       await Share.share({
-        message: isRTL
-          ? 'أحتاج مساعدة طبية عاجلة! هذا موقعي.'
-          : 'I need urgent medical help! This is my location.',
+        message: isAr
+          ? "أحتاج مساعدة طبية عاجلة! هذا موقعي."
+          : "I need urgent medical help! This is my location.",
       });
     } catch {}
-  };
+  }, [isAr]);
 
-  const emergencies: EmergencyItem[] = useMemo(
-    () => [
-      { number: '997', icon: 'medkit', iconType: 'ion', color: C.danger, bg: 'rgba(239,68,68,0.15)', labelKey: 'ambulance' },
-      { number: '998', icon: 'shield-checkmark', iconType: 'ion', color: C.warning, bg: 'rgba(245,158,11,0.15)', labelKey: 'police' },
-      { number: '999', icon: 'flame', iconType: 'ion', color: C.dangerLight, bg: 'rgba(248,113,113,0.15)', labelKey: 'fire' },
-      { number: '920033333', icon: 'call', iconType: 'ion', color: C.info, bg: 'rgba(14,165,233,0.15)', labelKey: 'health' },
-    ],
-    []
-  );
-
-  const firstAids: FirstAidItem[] = useMemo(
-    () => [
-      { icon: 'heart', iconType: 'ion', color: C.danger, bg: 'rgba(239,68,68,0.12)', titleKey: 'cpr', descKey: 'cprDesc', steps: ['cprStep1', 'cprStep2', 'cprStep3'] },
-      { icon: 'lungs', iconType: 'fa', color: C.info, bg: 'rgba(14,165,233,0.12)', titleKey: 'breathing', descKey: 'breathingDesc', steps: ['breathingStep1', 'breathingStep2', 'breathingStep3'] },
-      { icon: 'bed', iconType: 'fa', color: C.purple, bg: 'rgba(167,139,250,0.12)', titleKey: 'faint', descKey: 'faintDesc', steps: ['faintStep1', 'faintStep2', 'faintStep3'] },
-      { icon: 'water', iconType: 'ion', color: C.danger, bg: 'rgba(239,68,68,0.12)', titleKey: 'bleeding', descKey: 'bleedingDesc', steps: ['bleedingStep1', 'bleedingStep2', 'bleedingStep3'] },
-      { icon: 'flame', iconType: 'ion', color: C.warning, bg: 'rgba(245,158,11,0.12)', titleKey: 'burn', descKey: 'burnDesc', steps: ['burnStep1', 'burnStep2', 'burnStep3'] },
-      { icon: 'skull', iconType: 'ion', color: C.textMuted, bg: 'rgba(148,163,184,0.12)', titleKey: 'poison', descKey: 'poisonDesc', steps: ['poisonStep1', 'poisonStep2', 'poisonStep3'] },
-    ],
-    []
-  );
-
-  const renderIcon = (icon: string, type: IconType, color: string, size = 20) => {
-    if (type === 'fa') return <FontAwesome5 name={icon as any} size={size} color={color} />;
-    return <Ionicons name={icon as any} size={size} color={color} />;
-  };
+  const cardBg = darkMode ? "rgba(26,35,50,0.85)" : colors.surface;
 
   return (
-    <Screen style={{ backgroundColor: C.bg }}>
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        
-        {/* Header */}
-        <View style={[styles.header, isRTL && styles.rowReverse]}>
-          <View style={styles.headerText}>
-            <AppText variant="h1" style={[styles.headerTitle, isRTL && styles.textRight]}>
-              {t('emergencyTitle')}
-            </AppText>
-            <AppText style={[styles.headerSubtitle, isRTL && styles.textRight]}>
-              {t('emergencySubtitle')}
-            </AppText>
+    <Screen>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.scroll, { paddingBottom: bottomSpacing }]}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.danger} />
+        }
+      >
+        {/* ── Header ── */}
+        <View style={styles.header}>
+          <View style={[styles.headerIconWrap, { backgroundColor: colors.danger + "14" }]}>
+            <Ionicons name="shield-checkmark" size={26} color={colors.danger} />
           </View>
-          <View style={styles.headerIcon}>
-            <Ionicons name="warning" size={24} color={C.danger} />
+          <View style={styles.headerText}>
+            <AppText style={[styles.headerTitle, { color: colors.textPrimary }]}>{t.title}</AppText>
+            <AppText style={[styles.headerSub, { color: colors.textSecondary }]}>{t.subtitle}</AppText>
           </View>
         </View>
 
-        {/* SOS Button */}
+        {/* ── SOS Button ── */}
         <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={() => handleCall('997')}
+          activeOpacity={0.88}
+          onPress={() => handleCall("997")}
           style={styles.sosBtn}
         >
-          <View style={[styles.sosInner, isRTL && styles.rowReverse]}>
+          <View style={styles.sosInner}>
             <View style={styles.sosIconWrap}>
-              <Ionicons name="alert-circle" size={36} color="#fff" />
+              <Ionicons name="alert-circle" size={38} color="#fff" />
             </View>
             <View style={styles.sosTextWrap}>
-              <AppText style={styles.sosTitle}>{t('sos')}</AppText>
-              <AppText style={styles.sosDesc}>{t('sosDesc')}</AppText>
+              <AppText style={styles.sosTitle}>{t.sos}</AppText>
+              <AppText style={styles.sosDesc}>{t.sosDesc}</AppText>
             </View>
-            <View style={styles.sosArrow}>
-              <Ionicons name={isRTL ? 'chevron-back' : 'chevron-forward'} size={20} color="rgba(255,255,255,0.6)" />
+            <View style={styles.sosChevron}>
+              <Ionicons
+                name={isAr ? "chevron-back" : "chevron-forward"}
+                size={20}
+                color="rgba(255,255,255,0.6)"
+              />
             </View>
           </View>
         </TouchableOpacity>
 
-        {/* Share Location */}
-        <TouchableOpacity onPress={handleShare} style={[styles.shareBtn, isRTL && styles.rowReverse]}>
-          <Ionicons name="location-sharp" size={16} color={C.info} />
-          <AppText style={styles.shareText}>{t('shareLocation')}</AppText>
+        {/* ── Share Location ── */}
+        <TouchableOpacity
+          onPress={handleShare}
+          activeOpacity={0.75}
+          style={[styles.shareBtn, { borderColor: colors.primary + "30", backgroundColor: colors.primary + "08" }]}
+        >
+          <Ionicons name="location-sharp" size={16} color={colors.primary} />
+          <AppText style={[styles.shareText, { color: colors.primary }]}>{t.shareLocation}</AppText>
         </TouchableOpacity>
 
-        {/* Emergency Numbers - 2x2 Grid */}
-        <View style={[styles.grid2x2, isRTL && styles.gridRTL]}>
-          {emergencies.map((item) => (
+        {/* ── Quick Call Grid ── */}
+        <View style={styles.grid}>
+          {QUICK_CALLS.map((item) => (
             <TouchableOpacity
               key={item.number}
-              activeOpacity={0.85}
+              activeOpacity={0.82}
               onPress={() => handleCall(item.number)}
-              style={styles.gridItem}
+              style={[styles.gridCell, { backgroundColor: cardBg, borderColor: colors.border }]}
             >
-              <AppCard style={styles.emergencyCard}>
-                <View style={[styles.emergencyTop, isRTL && styles.rowReverse]}>
-                  <View style={[styles.emergencyIcon, { backgroundColor: item.bg }]}>
-                    {renderIcon(item.icon, item.iconType, item.color, 22)}
-                  </View>
-                  <AppText style={[styles.emergencyNumber, { color: item.color }]}>{item.number}</AppText>
-                </View>
-                <AppText style={[styles.emergencyLabel, isRTL && styles.textRight]}>{t(item.labelKey)}</AppText>
-                <View style={[styles.callPill, { backgroundColor: item.color + '18' }]}>
-                  <Ionicons name="call" size={12} color={item.color} />
-                  <AppText style={[styles.callPillText, { color: item.color }]}>{t('call')}</AppText>
-                </View>
-              </AppCard>
+              <View style={[styles.gridIcon, { backgroundColor: item.color + "18" }]}>
+                <Ionicons name={item.icon as any} size={22} color={item.color} />
+              </View>
+              <AppText style={[styles.gridNumber, { color: item.color }]}>{item.number}</AppText>
+              <AppText style={[styles.gridLabel, { color: colors.textPrimary }]}>{t[item.labelKey]}</AppText>
+              <View style={[styles.callPill, { backgroundColor: item.color + "14" }]}>
+                <Ionicons name="call" size={11} color={item.color} />
+                <AppText style={[styles.callPillText, { color: item.color }]}>{t.call}</AppText>
+              </View>
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* First Aid Section */}
-        <View style={[styles.sectionHeader, isRTL && styles.rowReverse]}>
-          <View style={[styles.sectionIcon, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
-            <Ionicons name="medical" size={20} color={C.success} />
-          </View>
-          <View style={styles.sectionHeaderText}>
-            <AppText variant="h2" style={[styles.sectionTitle, isRTL && styles.textRight]}>
-              {t('firstAidTitle')}
-            </AppText>
-            <AppText style={[styles.sectionSubtitle, isRTL && styles.textRight]}>
-              {t('firstAidSubtitle')}
-            </AppText>
-          </View>
+        {/* ── Emergency Contacts ── */}
+        <SectionHeader title={t.contacts} icon="people" iconColor={colors.primary} colors={colors} />
+        <View style={[styles.card, { backgroundColor: cardBg, borderColor: colors.border }]}>
+          {emergencyContacts.length === 0 ? (
+            <View style={styles.emptyRow}>
+              <Ionicons name="person-add-outline" size={22} color={colors.textSecondary + "60"} />
+              <AppText style={[styles.emptyText, { color: colors.textSecondary }]}>{t.noContacts}</AppText>
+            </View>
+          ) : (
+            emergencyContacts.map((contact: any, idx: number) => (
+              <TouchableOpacity
+                key={contact.id ?? idx}
+                activeOpacity={0.7}
+                onPress={() => contact.phone && handleCall(contact.phone)}
+                style={[
+                  styles.contactRow,
+                  idx < emergencyContacts.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border },
+                ]}
+              >
+                <View style={[styles.contactAvatar, { backgroundColor: colors.primary + "14" }]}>
+                  <AppText style={[styles.contactInitial, { color: colors.primary }]}>
+                    {(contact.name ?? "?")[0]?.toUpperCase()}
+                  </AppText>
+                </View>
+                <View style={styles.contactInfo}>
+                  <AppText style={[styles.contactName, { color: colors.textPrimary }]}>{contact.name ?? "—"}</AppText>
+                  <AppText style={[styles.contactRelation, { color: colors.textSecondary }]}>
+                    {contact.relationship ?? contact.relation ?? "—"}
+                    {contact.phone ? ` · ${contact.phone}` : ""}
+                  </AppText>
+                </View>
+                {contact.phone && (
+                  <View style={[styles.callCircle, { backgroundColor: colors.success + "14" }]}>
+                    <Ionicons name="call" size={16} color={colors.success} />
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))
+          )}
         </View>
 
-        <View style={styles.firstAidList}>
-          {firstAids.map((item) => (
-            <AppCard key={item.titleKey} style={styles.firstAidCard}>
-              <View style={[styles.firstAidHeader, isRTL && styles.rowReverse]}>
-                <View style={[styles.firstAidIcon, { backgroundColor: item.bg }]}>
-                  {renderIcon(item.icon, item.iconType, item.color, 18)}
+        {/* ── Active Alerts ── */}
+        <SectionHeader title={t.activeAlerts} icon="notifications" iconColor={colors.danger} colors={colors} />
+        <View style={[styles.card, { backgroundColor: cardBg, borderColor: colors.border }]}>
+          {recentAlerts.length === 0 ? (
+            <View style={styles.emptyRow}>
+              <Ionicons name="checkmark-circle-outline" size={22} color={colors.success + "80"} />
+              <AppText style={[styles.emptyText, { color: colors.textSecondary }]}>{t.noAlerts}</AppText>
+            </View>
+          ) : (
+            recentAlerts.map((alert: any, idx: number) => (
+              <View
+                key={alert.id ?? idx}
+                style={[
+                  styles.alertRow,
+                  idx < recentAlerts.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border },
+                ]}
+              >
+                <View style={[styles.alertDot, { backgroundColor: colors.danger }]} />
+                <View style={styles.alertText}>
+                  <AppText style={[styles.alertTitle, { color: colors.textPrimary }]}>{alert.title}</AppText>
+                  <AppText style={[styles.alertBody, { color: colors.textSecondary }]} numberOfLines={2}>{alert.body}</AppText>
                 </View>
-                <AppText variant="h2" style={[styles.firstAidTitle, { color: item.color }, isRTL && styles.textRight]}>
-                  {t(item.titleKey)}
-                </AppText>
               </View>
-              
-              <AppText style={[styles.firstAidDesc, isRTL && styles.textRight]}>
-                {t(item.descKey)}
-              </AppText>
+            ))
+          )}
+        </View>
 
-              <View style={styles.stepsWrap}>
-                <AppText style={[styles.stepsLabel, isRTL && styles.textRight]}>{t('steps')}</AppText>
-                <View style={styles.stepsList}>
-                  {item.steps.map((stepKey, idx) => (
-                    <View key={stepKey} style={[styles.stepRow, isRTL && styles.rowReverse]}>
-                      <View style={[styles.stepBadge, { backgroundColor: item.color + '18' }]}>
-                        <AppText style={[styles.stepNumber, { color: item.color }]}>{idx + 1}</AppText>
+        {/* ── Device Status ── */}
+        <SectionHeader title={t.gasStatus} icon="flame" iconColor="#F59E0B" colors={colors} />
+        <StatusCard
+          icon="flame-outline"
+          iconColor="#F59E0B"
+          label={t.gasStatus}
+          sublabel={t.gasNormal}
+          isOk
+          colors={colors}
+        />
+
+        <SectionHeader title={t.fallStatus} icon="body" iconColor={colors.primary} colors={colors} />
+        <StatusCard
+          icon="body-outline"
+          iconColor={colors.primary}
+          label={t.fallStatus}
+          sublabel={t.fallNormal}
+          isOk
+          colors={colors}
+        />
+
+        {/* ── Profile / Protocol Status ── */}
+        <SectionHeader title={t.protocolStatus} icon="shield-checkmark" iconColor={colors.success} colors={colors} />
+        {profileComplete === null ? null : profileComplete ? (
+          <StatusCard
+            icon="checkmark-circle"
+            iconColor={colors.success}
+            label={t.protocolStatus}
+            sublabel={t.profileComplete}
+            isOk
+            colors={colors}
+          />
+        ) : (
+          <View style={[styles.protocolIncomplete, { backgroundColor: colors.danger + "10", borderColor: colors.danger + "25" }]}>
+            <View style={[styles.protocolIcon, { backgroundColor: colors.danger + "18" }]}>
+              <Ionicons name="warning-outline" size={22} color={colors.danger} />
+            </View>
+            <View style={styles.protocolText}>
+              <AppText style={[styles.protocolLabel, { color: colors.danger }]}>{t.profileIncomplete}</AppText>
+              <AppText style={[styles.protocolSub, { color: colors.textSecondary }]}>{t.profileIncompleteDesc}</AppText>
+            </View>
+          </View>
+        )}
+
+        {/* ── First Aid Guide ── */}
+        <SectionHeader title={t.firstAidTitle} icon="medical" iconColor={colors.success} colors={colors} />
+        <View style={styles.firstAidList}>
+          {FIRST_AID_CARDS.map((item) => (
+            <View
+              key={item.titleKey}
+              style={[styles.firstAidCard, { backgroundColor: cardBg, borderColor: colors.border }]}
+            >
+              <View style={styles.firstAidHeader}>
+                <View style={[styles.firstAidIcon, { backgroundColor: item.color + "14" }]}>
+                  <Ionicons name={item.icon as any} size={18} color={item.color} />
+                </View>
+                <AppText style={[styles.firstAidTitle, { color: item.color }]}>{t[item.titleKey]}</AppText>
+              </View>
+              <View style={[styles.stepsDivider, { borderTopColor: colors.border }]}>
+                <AppText style={[styles.stepsLabel, { color: colors.textSecondary }]}>{t.steps}</AppText>
+                <View style={styles.stepsCol}>
+                  {item.steps.map((stepKey, i) => (
+                    <View key={stepKey} style={styles.stepRow}>
+                      <View style={[styles.stepBadge, { backgroundColor: item.color + "18" }]}>
+                        <AppText style={[styles.stepNum, { color: item.color }]}>{i + 1}</AppText>
                       </View>
-                      <AppText style={[styles.stepText, isRTL && styles.textRight]}>{t(stepKey)}</AppText>
+                      <AppText style={[styles.stepText, { color: colors.textPrimary }]}>{t[stepKey]}</AppText>
                     </View>
                   ))}
                 </View>
               </View>
-            </AppCard>
+            </View>
           ))}
         </View>
       </ScrollView>
@@ -327,253 +503,272 @@ export function EmergencyScreen(): React.JSX.Element {
   );
 }
 
+// ─── Styles ──────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: {
-    padding: 16,
-    paddingBottom: 40,
-    gap: 12,
+  scroll: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    gap: spacing.md,
   },
-  rowReverse: { flexDirection: 'row-reverse' },
-  textRight: { textAlign: 'right' },
-  gridRTL: { flexDirection: 'row-reverse' },
 
+  // Header
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    marginBottom: spacing.xs,
   },
-  headerText: { flex: 1 },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: '900',
-    color: C.text,
-    letterSpacing: -0.5,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: C.textMuted,
-    marginTop: 3,
-  },
-  headerIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: 'rgba(239,68,68,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  /* SOS */
-  sosBtn: {
-    backgroundColor: C.danger,
-    borderRadius: 20,
-    padding: 18,
-    shadowColor: C.danger,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  sosInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  sosIconWrap: {
+  headerIconWrap: {
     width: 52,
     height: 52,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
-  sosTextWrap: { flex: 1 },
-  sosTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '900',
+  headerText: { flex: 1, gap: 2 },
+  headerTitle: { fontSize: 24, fontWeight: "900", letterSpacing: -0.4 },
+  headerSub: { fontSize: 13, fontWeight: "500" },
+
+  // SOS
+  sosBtn: {
+    backgroundColor: "#FF3B3B",
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    shadowColor: "#FF3B3B",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+    elevation: 8,
   },
-  sosDesc: {
-    color: 'rgba(255,255,255,0.75)',
-    fontSize: 13,
-    marginTop: 2,
+  sosInner: { flexDirection: "row", alignItems: "center", gap: 14 },
+  sosIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  sosArrow: {
+  sosTextWrap: { flex: 1, gap: 2 },
+  sosTitle: { color: "#fff", fontSize: 19, fontWeight: "900" },
+  sosDesc: { color: "rgba(255,255,255,0.75)", fontSize: 13 },
+  sosChevron: {
     width: 32,
     height: 32,
     borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
-  /* Share */
+  // Share
   shareBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(14,165,233,0.06)',
-    borderRadius: 12,
+    paddingVertical: 11,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: 'rgba(14,165,233,0.15)',
   },
-  shareText: {
-    color: C.info,
-    fontSize: 13,
-    fontWeight: '700',
-  },
+  shareText: { fontSize: 13, fontWeight: "700" },
 
-  /* 2x2 Grid */
-  grid2x2: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+  // Quick Call Grid
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
   },
-  gridItem: {
-    width: '48%',
+  gridCell: {
+    width: "48%",
     flexGrow: 1,
-  },
-  emergencyCard: {
-    backgroundColor: C.card,
-    borderRadius: 18,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: C.cardBorder,
-    padding: 14,
-    gap: 10,
-  },
-  emergencyTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  emergencyIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emergencyNumber: {
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  emergencyLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: C.text,
-  },
-  callPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: spacing.md,
     gap: 6,
-    paddingVertical: 8,
-    borderRadius: 10,
+    alignItems: "flex-start",
   },
-  callPillText: {
-    fontSize: 13,
-    fontWeight: '800',
+  gridIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
   },
+  gridNumber: { fontSize: 17, fontWeight: "800", letterSpacing: 0.5 },
+  gridLabel: { fontSize: 13, fontWeight: "700" },
+  callPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  callPillText: { fontSize: 12, fontWeight: "800" },
 
-  /* Section */
+  // Section header
   sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginTop: 8,
-    marginBottom: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.xs,
   },
   sectionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  sectionHeaderText: { flex: 1, gap: 2 },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: C.text,
-  },
-  sectionSubtitle: {
-    fontSize: 13,
-    color: C.textMuted,
+  sectionTitle: { fontSize: 15, fontWeight: "700" },
+
+  // Generic card
+  card: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    overflow: "hidden",
   },
 
-  /* First Aid */
-  firstAidList: { gap: 10 },
-  firstAidCard: {
-    backgroundColor: C.card,
-    borderRadius: 18,
+  // Empty rows
+  emptyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.lg,
+    justifyContent: "center",
+  },
+  emptyText: { fontSize: 13, fontWeight: "500" },
+
+  // Contacts
+  contactRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  contactAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  contactInitial: { fontSize: 16, fontWeight: "800" },
+  contactInfo: { flex: 1, gap: 2 },
+  contactName: { fontSize: 14, fontWeight: "700" },
+  contactRelation: { fontSize: 12, fontWeight: "500" },
+  callCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // Alerts
+  alertRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  alertDot: { width: 8, height: 8, borderRadius: 4, marginTop: 5 },
+  alertText: { flex: 1, gap: 2 },
+  alertTitle: { fontSize: 14, fontWeight: "600" },
+  alertBody: { fontSize: 12, fontWeight: "500", lineHeight: 18 },
+
+  // Status card
+  statusCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: C.cardBorder,
-    padding: 16,
-    gap: 8,
+  },
+  statusIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statusText: { flex: 1, gap: 2 },
+  statusLabel: { fontSize: 14, fontWeight: "700" },
+  statusSub: { fontSize: 12, fontWeight: "500" },
+  statusDot: { width: 10, height: 10, borderRadius: 5 },
+
+  // Protocol incomplete
+  protocolIncomplete: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+  },
+  protocolIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  protocolText: { flex: 1, gap: 2 },
+  protocolLabel: { fontSize: 14, fontWeight: "700" },
+  protocolSub: { fontSize: 12, fontWeight: "500" },
+
+  // First Aid
+  firstAidList: { gap: spacing.sm },
+  firstAidCard: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    overflow: "hidden",
+    padding: spacing.md,
+    gap: spacing.sm,
   },
   firstAidHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
   },
   firstAidIcon: {
     width: 36,
     height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  firstAidTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    flex: 1,
-  },
-  firstAidDesc: {
-    fontSize: 13,
-    color: C.textMuted,
-    lineHeight: 20,
-  },
-
-  /* Steps */
-  stepsWrap: {
-    marginTop: 6,
-    paddingTop: 12,
+  firstAidTitle: { fontSize: 15, fontWeight: "800", flex: 1 },
+  stepsDivider: {
+    paddingTop: spacing.sm,
     borderTopWidth: 1,
-    borderTopColor: C.cardBorder,
+    gap: spacing.xs,
   },
   stepsLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: C.textMuted,
-    textTransform: 'uppercase',
+    fontSize: 10,
+    fontWeight: "800",
+    textTransform: "uppercase",
     letterSpacing: 0.8,
-    marginBottom: 8,
   },
-  stepsList: { gap: 8 },
+  stepsCol: { gap: 6 },
   stepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   stepBadge: {
     width: 22,
     height: 22,
     borderRadius: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 22,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  stepNumber: {
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  stepText: {
-    flex: 1,
-    fontSize: 13,
-    color: C.text,
-    lineHeight: 20,
-  },
+  stepNum: { fontSize: 11, fontWeight: "900" },
+  stepText: { flex: 1, fontSize: 13, lineHeight: 20 },
 });
+
+export default EmergencyScreen;

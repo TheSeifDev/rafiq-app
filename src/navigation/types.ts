@@ -15,11 +15,10 @@ export type AuthStackParamList = {
 };
 
 // ─── Main Tab Navigator ──────────────────────────────────────
-// Tabs: Home · Vitals (Measurements) · Medications · Chat (Messages) · Profile
-// Emergency removed from tabs — accessible from HomeScreen
+// Tabs: Home · Emergency · Medications · Chat · Profile
 export type MainTabParamList = {
   Home: undefined;
-  Vitals: undefined;
+  Emergency: undefined;
   Medications: undefined;
   Chat: undefined;
   Profile: NavigatorScreenParams<ProfileStackParamList>;
@@ -30,7 +29,6 @@ export type MainStackParamList = {
   MainTabs: NavigatorScreenParams<MainTabParamList>;
   NotificationCenter: undefined;
   NotificationSettings: undefined;
-  Emergency: undefined;
 };
 
 // ─── Profile Stack (nested inside Profile tab) ──────────────
@@ -44,8 +42,6 @@ export type ProfileStackParamList = {
   TermsOfService: undefined;
   PrivacyPolicy: undefined;
   Food: undefined;
-  WeeklyTrends: undefined;
-  WearablePairing: undefined;
 };
 
 // ─── Screen-prop helpers ────────────────────────────────────

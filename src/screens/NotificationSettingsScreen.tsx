@@ -454,7 +454,7 @@ export function NotificationSettingsScreen(): React.JSX.Element {
           </TouchableOpacity>
         </SectionCard>
 
-        <View style={{ height: spacing['2xl'] }} />
+        <View style={{ height: 110 }} />
       </ScrollView>
     </Screen>
   );

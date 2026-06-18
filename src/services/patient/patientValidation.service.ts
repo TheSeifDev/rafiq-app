@@ -1,141 +1,94 @@
-/**
- * Patient Profile Validation Engine — Detects incomplete medical data
- * Validates all patient fields according to strict rules
- */
-
-export interface PatientProfileValidation {
+export interface ProfileValidationResult {
   isComplete: boolean;
-  missingFields: string[];
   completionPercentage: number;
+  missingFields: string[];
 }
 
-export interface PatientProfile {
-  full_name?: string | null;
-  birth_date?: string | null;
-  gender?: string | null;
-  blood_type?: string | null;
-  emergency_contact?: string | null;
-  address?: string | null;
-  medical_conditions?: string | null;
-  medications?: string | null;
-  allergies?: string | null;
-  reporter_data?: string | null;
-  hospital_data?: string | null;
-  phone?: string | null;
+export interface PatientProfileValidationInput {
+  full_name?: unknown;
+  phone?: unknown;
+  birth_date?: unknown;
+  gender?: unknown;
+  blood_type?: unknown;
+  address?: unknown;
+  emergency_contact?: unknown;
+  allergies?: unknown;
+  medications?: unknown;
+  conditions?: unknown;
+  chronic_conditions?: unknown;
+  medical_conditions?: unknown;
+  hospital_data?: unknown;
+  reporter_data?: unknown;
 }
 
-const VALIDATION_FIELDS: { key: keyof PatientProfile; label: string }[] = [
-  { key: 'full_name', label: 'Full Name' },
-  { key: 'birth_date', label: 'Birth Date' },
-  { key: 'gender', label: 'Gender' },
-  { key: 'blood_type', label: 'Blood Type' },
-  { key: 'emergency_contact', label: 'Emergency Contact' },
-  { key: 'address', label: 'Address' },
-  { key: 'phone', label: 'Phone' },
-  { key: 'medical_conditions', label: 'Medical Conditions' },
-  { key: 'medications', label: 'Medications' },
-  { key: 'allergies', label: 'Allergies' },
-  { key: 'reporter_data', label: 'Reporter Data' },
-  { key: 'hospital_data', label: 'Hospital Data' },
+const REQUIRED_FIELDS: Array<{
+  key: string;
+  label: string;
+  resolve: (profile: PatientProfileValidationInput) => unknown;
+}> = [
+  { key: 'full_name', label: 'Full Name', resolve: (p) => p.full_name },
+  { key: 'phone', label: 'Phone', resolve: (p) => p.phone },
+  { key: 'birth_date', label: 'Birth Date', resolve: (p) => p.birth_date },
+  { key: 'gender', label: 'Gender', resolve: (p) => p.gender },
+  { key: 'blood_type', label: 'Blood Type', resolve: (p) => p.blood_type },
+  { key: 'address', label: 'Address', resolve: (p) => p.address },
+  { key: 'emergency_contact', label: 'Emergency Contact', resolve: (p) => p.emergency_contact },
+  { key: 'allergies', label: 'Allergies', resolve: (p) => p.allergies },
+  { key: 'medications', label: 'Medications', resolve: (p) => p.medications },
+  {
+    key: 'conditions',
+    label: 'Conditions',
+    resolve: (p) => p.conditions ?? p.chronic_conditions ?? p.medical_conditions,
+  },
+  { key: 'hospital_data', label: 'Hospital Data', resolve: (p) => p.hospital_data },
+  { key: 'reporter_data', label: 'Reporter Data', resolve: (p) => p.reporter_data },
 ];
 
-function isFieldValid(value: unknown): boolean {
-  // null = invalid
-  if (value === null) return false;
-
-  // undefined = invalid
-  if (value === undefined) return false;
-
-  // empty string = invalid
-  if (typeof value === 'string' && value.trim() === '') return false;
-
-  // empty object = invalid
-  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-    const keys = Object.keys(value);
-    if (keys.length === 0) return false;
-    // Check if all nested values are empty
-    const allEmpty = keys.every((key) => isFieldValid((value as Record<string, unknown>)[key]));
-    if (allEmpty) return false;
+export function isValidProfileValue(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        return isValidProfileValue(JSON.parse(trimmed));
+      } catch {
+        return true;
+      }
+    }
+    return true;
   }
-
-  // empty array = invalid
-  if (Array.isArray(value) && value.length === 0) return false;
-
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') {
+    const values = Object.values(value as Record<string, unknown>);
+    return values.length > 0 && values.some(isValidProfileValue);
+  }
   return true;
 }
 
 class PatientValidationService {
-  /**
-   * Validate patient profile and return detailed validation result
-   */
-  validatePatientProfile(profile: PatientProfile | null): PatientProfileValidation {
+  validatePatientProfile(profile: PatientProfileValidationInput | null | undefined): ProfileValidationResult {
     if (!profile) {
       return {
         isComplete: false,
-        missingFields: VALIDATION_FIELDS.map((f) => f.label),
         completionPercentage: 0,
+        missingFields: REQUIRED_FIELDS.map((field) => field.label),
       };
     }
 
-    const missingFields: string[] = [];
+    const missingFields = REQUIRED_FIELDS
+      .filter((field) => !isValidProfileValue(field.resolve(profile)))
+      .map((field) => field.label);
 
-    for (const field of VALIDATION_FIELDS) {
-      const value = profile[field.key];
-
-      if (!isFieldValid(value)) {
-        missingFields.push(field.label);
-      }
-    }
-
-    const totalFields = VALIDATION_FIELDS.length;
-    const filledFields = totalFields - missingFields.length;
-    const completionPercentage = Math.round((filledFields / totalFields) * 100);
+    const completionPercentage = Math.round(
+      ((REQUIRED_FIELDS.length - missingFields.length) / REQUIRED_FIELDS.length) * 100,
+    );
 
     return {
       isComplete: missingFields.length === 0,
-      missingFields,
       completionPercentage,
+      missingFields,
     };
-  }
-
-  /**
-   * Quick check if profile is complete (for use in conditional rendering)
-   */
-  isProfileComplete(profile: PatientProfile | null): boolean {
-    return this.validatePatientProfile(profile).isComplete;
-  }
-
-  /**
-   * Get list of missing field keys (for programmatic use)
-   */
-  getMissingFieldKeys(profile: PatientProfile | null): (keyof PatientProfile)[] {
-    if (!profile) {
-      return VALIDATION_FIELDS.map((f) => f.key);
-    }
-
-    const missing: (keyof PatientProfile)[] = [];
-
-    for (const field of VALIDATION_FIELDS) {
-      if (!isFieldValid(profile[field.key])) {
-        missing.push(field.key);
-      }
-    }
-
-    return missing;
-  }
-
-  /**
-   * Get validation summary for display
-   */
-  getValidationSummary(profile: PatientProfile | null): string {
-    const validation = this.validatePatientProfile(profile);
-
-    if (validation.isComplete) {
-      return 'Profile is complete';
-    }
-
-    const count = validation.missingFields.length;
-    return `${count} field${count > 1 ? 's' : ''} missing: ${validation.missingFields.join(', ')}`;
   }
 }
 

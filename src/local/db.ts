@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { RAFIQ_SQLITE_SCHEMA } from './schema';
+import { createUuid as createRuntimeUuid } from '../utils/uuid';
 
 const DB_NAME = 'rafiq-local.db';
 
@@ -8,14 +9,7 @@ let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 export type SqlValue = string | number | boolean | null | undefined;
 
 export function createUuid(): string {
-  const maybeCrypto = globalThis.crypto as Crypto | undefined;
-  if (maybeCrypto?.randomUUID) return maybeCrypto.randomUUID();
-
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = Math.floor(Math.random() * 16);
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  return createRuntimeUuid();
 }
 
 export async function getLocalDb(): Promise<SQLite.SQLiteDatabase> {

@@ -11,12 +11,27 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+import { isUuid } from '../utils/uuid';
 
 const QUEUE_KEY = 'rafiq_offline_queue_v3';
 const META_KEY = 'rafiq_offline_meta_v2';
 const DEAD_LETTER_KEY = 'rafiq_offline_dead_letter';
 const MAX_QUEUE_SIZE = 500;
 const MAX_RETRIES = 5;
+const UUID_REFERENCE_COLUMNS = new Set([
+  'id',
+  'user_id',
+  'patient_id',
+  'medication_id',
+  'notification_id',
+  'conversation_id',
+  'reminder_id',
+  'wearable_id',
+  'vitals_reading_id',
+  'smart_home_device_id',
+  'source_message_id',
+  'emergency_event_id',
+]);
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -72,6 +87,28 @@ function validatePayload(payload: unknown): payload is Record<string, unknown> {
     return true;
   } catch {
     return false;
+  }
+}
+
+function unwrapPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const nested = payload.payload;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    return nested as Record<string, unknown>;
+  }
+  return payload;
+}
+
+function assertValidUuidPayload(item: QueueItem, payload: Record<string, unknown>): void {
+  if (!isUuid(item.recordId)) {
+    throw new Error(`Refusing to sync ${item.table}: record id is not a UUID`);
+  }
+
+  for (const [key, value] of Object.entries(payload)) {
+    if (!UUID_REFERENCE_COLUMNS.has(key) || value == null) continue;
+    if (typeof value === 'string' && value.trim() === '') continue;
+    if (!isUuid(value)) {
+      throw new Error(`Refusing to sync ${item.table}: ${key} is not a UUID`);
+    }
   }
 }
 
@@ -312,6 +349,9 @@ async function _pushItem(item: QueueItem): Promise<{
   remoteData?: Record<string, unknown>;
 }> {
   try {
+    const payload = unwrapPayload(item.payload);
+    assertValidUuidPayload(item, payload);
+
     if (item.operation === 'DELETE') {
       const { error } = await supabase
         .from(item.table)
@@ -324,13 +364,13 @@ async function _pushItem(item: QueueItem): Promise<{
     if (item.operation === 'INSERT') {
       const { data, error } = await supabase
         .from(item.table)
-        .upsert(item.payload, { onConflict: 'id' })
+        .upsert(payload, { onConflict: 'id' })
         .select()
         .single();
       if (error) {
         // Check for conflict (409)
         if (error.code === '23505') {
-          return { pushed: false, conflict: true, remoteData: item.payload };
+          return { pushed: false, conflict: true, remoteData: payload };
         }
         throw error;
       }
@@ -353,12 +393,12 @@ async function _pushItem(item: QueueItem): Promise<{
 
     const { error } = await supabase
       .from(item.table)
-      .upsert(item.payload, { onConflict: 'id' });
+      .upsert(payload, { onConflict: 'id' });
     if (error) throw error;
 
     return { pushed: true };
-  } catch {
-    throw new Error(item.lastError ?? 'Push failed');
+  } catch (err) {
+    throw err instanceof Error ? err : new Error('Push failed');
   }
 }
 
