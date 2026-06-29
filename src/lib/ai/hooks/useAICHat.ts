@@ -39,6 +39,7 @@ export interface AIChatState {
 }
 
 interface UseAICHatOptions {
+  userId?: string | null;
   isRTL?: boolean;
   onError?: (error: string) => void;
   onProviderChange?: (provider: string) => void;
@@ -99,11 +100,11 @@ const convertPatientContextToHealthContext = (pc: PatientContext): HealthContext
       })),
       primaryContact: pc.emergency.primaryContact
         ? {
-            name: pc.emergency.primaryContact.name,
-            relation: pc.emergency.primaryContact.relation,
-            phone: pc.emergency.primaryContact.phone,
-            isPrimary: !!pc.emergency.primaryContact.is_primary,
-          }
+          name: pc.emergency.primaryContact.name,
+          relation: pc.emergency.primaryContact.relation,
+          phone: pc.emergency.primaryContact.phone,
+          isPrimary: !!pc.emergency.primaryContact.is_primary,
+        }
         : null,
       profile: pc.emergency.profile,
     },
@@ -121,6 +122,7 @@ export function useAICHat({
   isRTL = false,
   onError,
   onProviderChange,
+  userId,
 }: UseAICHatOptions) {
   const [state, setState] = useState<AIChatState>({
     messages: [],
@@ -222,10 +224,10 @@ export function useAICHat({
       }));
 
       try {
-        const userId = await getUserId();
+        const effectiveUserId = userId || await getUserId();
         let healthContextToUse: HealthContextData | undefined;
-        if (userId) {
-          const patientContext = await patientContextAggregator.aggregate(userId);
+        if (effectiveUserId) {
+          const patientContext = await patientContextAggregator.aggregate(effectiveUserId);
           healthContextToUse = convertPatientContextToHealthContext(patientContext);
         } else {
           if (!initializedRef.current) {
@@ -245,7 +247,7 @@ export function useAICHat({
 
         const response: AIResponse = await aiManager.generate(
           content,
-          (_chunk: StreamChunk) => {},
+          (_chunk: StreamChunk) => { },
         );
 
         const suggestedReplies = generateSuggestions(content, response.content, isRTL);
@@ -312,12 +314,12 @@ export function useAICHat({
           messages: prev.messages.map(m =>
             m.id === assistantId
               ? {
-                  ...m,
-                  isStreaming: false,
-                  content: isRTL
-                    ? '\u0639\u0630\u0631\u0627\u064b\u060c \u062d\u062f\u062b \u062e\u0637\u0623 \u0641\u064a \u0627\u0644\u0627\u062a\u0635\u0627\u0644. \u064a\u0631\u062c\u0649 \u0627\u0644\u0645\u062d\u0627\u0648\u0644\u0629 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.'
-                    : 'Sorry, there was a connection error. Please try again.',
-                }
+                ...m,
+                isStreaming: false,
+                content: isRTL
+                  ? '\u0639\u0630\u0631\u0627\u064b\u060c \u062d\u062f\u062b \u062e\u0637\u0623 \u0641\u064a \u0627\u0644\u0627\u062a\u0635\u0627\u0644. \u064a\u0631\u062c\u0649 \u0627\u0644\u0645\u062d\u0627\u0648\u0644\u0629 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.'
+                  : 'Sorry, there was a connection error. Please try again.',
+              }
               : m
           ),
         }));

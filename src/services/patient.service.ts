@@ -11,7 +11,6 @@ import {
   PatientConditionUpdate,
 } from '../repositories/PatientRepository';
 
-// Repository instances (lazy)
 let _patientRepo: PatientRepository | null = null;
 let _contactRepo: EmergencyContactRepository | null = null;
 let _conditionRepo: PatientConditionRepository | null = null;
@@ -31,11 +30,9 @@ function getConditionRepo(): PatientConditionRepository {
   return _conditionRepo;
 }
 
-// ─── Public re-exports for backward compat ───
 export type PatientProfile = PatientNormalizedRow;
 
 export const patientService = {
-  // ─── Patient CRUD ───────────────────────────────────────
 
   async getProfile(userId: string): Promise<PatientNormalizedRow | null> {
     const repo = getPatientRepo();
@@ -62,8 +59,6 @@ export const patientService = {
     return await repo.getIdByUserId(userId);
   },
 
-  // ─── Emergency Contacts ─────────────────────────────────
-
   async getEmergencyContacts(patientId: string) {
     const repo = getContactRepo();
     return await repo.getByPatientId(patientId);
@@ -78,8 +73,6 @@ export const patientService = {
     const repo = getContactRepo();
     await repo.delete(id);
   },
-
-  // ─── Patient Conditions ─────────────────────────────────
 
   async getConditions(patientId: string) {
     const repo = getConditionRepo();

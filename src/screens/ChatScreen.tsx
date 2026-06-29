@@ -7,11 +7,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  useColorScheme,
-  StatusBar,
   TextInput,
   Animated,
 } from "react-native";
+import { useAppStore } from "../store/app.store";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -296,8 +295,8 @@ export function ChatScreen(): React.JSX.Element {
   const { isRTL } = useLocale();
   const session = useAuthStore((s) => s.session);
   const insets = useSafeAreaInsets();
-  const colorScheme = useColorScheme();
-  const theme = getChatTheme(colorScheme === 'dark');
+  const darkMode = useAppStore((s) => s.darkMode);
+  const theme = getChatTheme(darkMode);
 
   let tabH = 0;
   try {
@@ -399,6 +398,7 @@ export function ChatScreen(): React.JSX.Element {
 
   const { messages, isLoading, isStreaming, sendMessage } = useAICHat({
     isRTL,
+    userId: session?.user.id,
     onError: (err) => console.log("[Chat] Error:", err),
   });
 
@@ -432,10 +432,6 @@ export function ChatScreen(): React.JSX.Element {
 
   return (
     <Screen style={{ backgroundColor: theme.background }}>
-      <StatusBar
-        barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'}
-        backgroundColor={theme.surface}
-      />
 
       <KeyboardAvoidingView
         style={[styles.flex, { backgroundColor: theme.background }]}

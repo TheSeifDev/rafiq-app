@@ -1,129 +1,100 @@
-/**
- * Chat Theme System
- * Premium semantic tokens for chat UI
- */
-
 export interface ChatTheme {
-  // Backgrounds
   background: string;
   surface: string;
   surfaceElevated: string;
 
-  // Bubbles
   userBubble: string;
   userBubbleText: string;
   aiBubble: string;
   aiBubbleText: string;
 
-  // Input
   inputBackground: string;
   inputBorder: string;
   inputBorderFocused: string;
   inputText: string;
   inputPlaceholder: string;
 
-  // Primary
   primary: string;
   primarySoft: string;
 
-  // Text
   textPrimary: string;
   textSecondary: string;
   textTertiary: string;
 
-  // Status
   online: string;
   thinking: string;
 
-  // Borders
   border: string;
   borderLight: string;
 
-  // Shadows
   shadowBubble: string;
   shadowInput: string;
 }
 
 export const lightTheme: ChatTheme = {
-  // Backgrounds
-  background: '#f8fafc',
-  surface: '#ffffff',
-  surfaceElevated: '#ffffff',
+  background: '#F0F2F7',
+  surface: '#FFFFFF',
+  surfaceElevated: '#FFFFFF',
 
-  // Bubbles
-  userBubble: '#4a6fa5',
-  userBubbleText: '#ffffff',
-  aiBubble: '#ffffff',
-  aiBubbleText: '#1e293b',
+  userBubble: '#2563EB',
+  userBubbleText: '#FFFFFF',
+  aiBubble: '#FFFFFF',
+  aiBubbleText: '#1A1A2E',
 
-  // Input
-  inputBackground: '#f1f5f9',
-  inputBorder: '#e2e8f0',
-  inputBorderFocused: '#4a6fa5',
-  inputText: '#1e293b',
-  inputPlaceholder: '#94a3b8',
+  inputBackground: '#EEF0F5',
+  inputBorder: '#D9DCE4',
+  inputBorderFocused: '#2563EB',
+  inputText: '#1A1A2E',
+  inputPlaceholder: '#8E93A4',
 
-  // Primary
-  primary: '#4a6fa5',
-  primarySoft: '#e8f4fd',
+  primary: '#2563EB',
+  primarySoft: 'rgba(37, 99, 235, 0.08)',
 
-  // Text
-  textPrimary: '#1e293b',
-  textSecondary: '#64748b',
-  textTertiary: '#94a3b8',
+  textPrimary: '#111827',
+  textSecondary: '#6B7280',
+  textTertiary: '#9CA3AF',
 
-  // Status
-  online: '#22c55e',
-  thinking: '#4a6fa5',
+  online: '#22C55E',
+  thinking: '#2563EB',
 
-  // Borders
-  border: '#e2e8f0',
-  borderLight: '#f1f5f9',
+  border: '#E5E7EB',
+  borderLight: '#F3F4F6',
 
-  // Shadows
-  shadowBubble: 'rgba(0, 0, 0, 0.06)',
-  shadowInput: 'rgba(0, 0, 0, 0.08)',
+  shadowBubble: 'rgba(0, 0, 0, 0.05)',
+  shadowInput: 'rgba(0, 0, 0, 0.06)',
 };
 
 export const darkTheme: ChatTheme = {
-  // Backgrounds
-  background: '#0f172a',
-  surface: '#1e293b',
-  surfaceElevated: '#334155',
+  background: '#0B0D14',
+  surface: '#151822',
+  surfaceElevated: '#1E2130',
 
-  // Bubbles
-  userBubble: '#4a6fa5',
-  userBubbleText: '#ffffff',
-  aiBubble: '#1e293b',
-  aiBubbleText: '#f1f5f9',
+  userBubble: '#3B6CF5',
+  userBubbleText: '#FFFFFF',
+  aiBubble: '#1A1D2B',
+  aiBubbleText: '#E4E6EF',
 
-  // Input
-  inputBackground: '#1e293b',
-  inputBorder: '#334155',
-  inputBorderFocused: '#4a6fa5',
-  inputText: '#f1f5f9',
-  inputPlaceholder: '#64748b',
+  inputBackground: '#1A1D2B',
+  inputBorder: '#2A2D3D',
+  inputBorderFocused: '#3B6CF5',
+  inputText: '#E4E6EF',
+  inputPlaceholder: '#5C6078',
 
-  // Primary
-  primary: '#60a5fa',
-  primarySoft: '#1e3a5f',
+  primary: '#3B6CF5',
+  primarySoft: 'rgba(59, 108, 245, 0.12)',
 
-  // Text
-  textPrimary: '#f1f5f9',
-  textSecondary: '#94a3b8',
-  textTertiary: '#64748b',
+  textPrimary: '#F0F1F6',
+  textSecondary: '#8B8FA6',
+  textTertiary: '#5C6078',
 
-  // Status
-  online: '#22c55e',
-  thinking: '#60a5fa',
+  online: '#22C55E',
+  thinking: '#3B6CF5',
 
-  // Borders
-  border: '#334155',
-  borderLight: '#1e293b',
+  border: '#22253A',
+  borderLight: '#181B28',
 
-  // Shadows
-  shadowBubble: 'rgba(0, 0, 0, 0.3)',
-  shadowInput: 'rgba(0, 0, 0, 0.4)',
+  shadowBubble: 'rgba(0, 0, 0, 0.25)',
+  shadowInput: 'rgba(0, 0, 0, 0.35)',
 };
 
 export function getChatTheme(isDark: boolean): ChatTheme {
