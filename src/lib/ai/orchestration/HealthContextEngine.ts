@@ -1,8 +1,3 @@
-/**
- * Health Context Engine
- * Automatically builds healthcare context for AI prompts
- */
-
 export interface VitalsReading {
   heartRate?: number;
   bloodPressureSys?: number;
@@ -40,6 +35,56 @@ export interface SleepRecord {
   quality?: 'good' | 'fair' | 'poor';
 }
 
+interface ConditionInfo {
+  name: string;
+  severity: string | null;
+  diagnosedDate: string | null;
+  notes: string | null;
+  isActive: boolean;
+}
+
+interface HospitalInfo {
+  name: string | null;
+  address: string | null;
+  phone: string | null;
+  hasMedicalFile: boolean | null;
+  fileNumber: string | null;
+}
+
+interface ReporterInfo {
+  name: string | null;
+  relationship: string | null;
+  phone: string | null;
+  isPrimaryContact: boolean | null;
+}
+
+interface AddressInfo {
+  city: string | null;
+  area: string | null;
+  detailed: string | null;
+  geocoded: string | null;
+}
+
+interface EmergencyContactInfo {
+  name: string;
+  relation: string;
+  phone: string;
+  isPrimary: boolean;
+}
+
+interface EmergencyInfo {
+  contacts: EmergencyContactInfo[];
+  primaryContact: EmergencyContactInfo | null;
+  profile: string | null;
+}
+
+interface ProfileCompletionInfo {
+  percentage: number;
+  completedFields: string[];
+  missingFields: string[];
+  readinessScore: number;
+}
+
 export interface HealthContextData {
   patientName: string;
   latestVitals: VitalsReading;
@@ -47,24 +92,27 @@ export interface HealthContextData {
   recentAlerts: AlertInfo[];
   foodLogs: FoodLogEntry[];
   sleepRecords: SleepRecord[];
+  conditions: ConditionInfo[];
+  allergies: string[];
+  hospital: HospitalInfo;
+  reporter: ReporterInfo;
+  address: AddressInfo;
+  emergency: EmergencyInfo;
+  profileCompletion: ProfileCompletionInfo;
   lastUpdated: string;
 }
 
 export interface HealthInsight {
-  type: 'vitals' | 'medication' | 'food' | 'sleep' | 'alert';
+  type: 'vitals' | 'medication' | 'food' | 'sleep' | 'alert' | 'condition' | 'allergy' | 'hospital' | 'reporter' | 'address' | 'emergency' | 'profile';
   priority: 'high' | 'medium' | 'low';
   title: string;
   description: string;
   value?: string;
 }
 
-/**
- * Analyze vitals and generate insights
- */
 export function analyzeVitals(vitals: VitalsReading): HealthInsight[] {
   const insights: HealthInsight[] = [];
 
-  // Heart rate analysis
   if (vitals.heartRate) {
     if (vitals.heartRate > 100) {
       insights.push({
@@ -85,7 +133,6 @@ export function analyzeVitals(vitals: VitalsReading): HealthInsight[] {
     }
   }
 
-  // Blood pressure analysis
   if (vitals.bloodPressureSys && vitals.bloodPressureDia) {
     if (vitals.bloodPressureSys > 140 || vitals.bloodPressureDia > 90) {
       insights.push({
@@ -106,7 +153,6 @@ export function analyzeVitals(vitals: VitalsReading): HealthInsight[] {
     }
   }
 
-  // Oxygen saturation
   if (vitals.oxygenSaturation && vitals.oxygenSaturation < 94) {
     insights.push({
       type: 'vitals',
@@ -117,7 +163,6 @@ export function analyzeVitals(vitals: VitalsReading): HealthInsight[] {
     });
   }
 
-  // Temperature
   if (vitals.temperature) {
     if (vitals.temperature > 38) {
       insights.push({
@@ -133,9 +178,6 @@ export function analyzeVitals(vitals: VitalsReading): HealthInsight[] {
   return insights;
 }
 
-/**
- * Analyze medications
- */
 export function analyzeMedications(medications: MedicationInfo[]): HealthInsight[] {
   const insights: HealthInsight[] = [];
 
@@ -154,9 +196,6 @@ export function analyzeMedications(medications: MedicationInfo[]): HealthInsight
   return insights;
 }
 
-/**
- * Analyze alerts
- */
 export function analyzeAlerts(alerts: AlertInfo[]): HealthInsight[] {
   return alerts.map(alert => ({
     type: 'alert' as const,
@@ -167,9 +206,6 @@ export function analyzeAlerts(alerts: AlertInfo[]): HealthInsight[] {
   }));
 }
 
-/**
- * Analyze food logs
- */
 export function analyzeFood(foodLogs: FoodLogEntry[]): HealthInsight[] {
   const insights: HealthInsight[] = [];
 
@@ -190,9 +226,6 @@ export function analyzeFood(foodLogs: FoodLogEntry[]): HealthInsight[] {
   return insights;
 }
 
-/**
- * Analyze sleep
- */
 export function analyzeSleep(sleepRecords: SleepRecord[]): HealthInsight[] {
   const insights: HealthInsight[] = [];
 
@@ -224,9 +257,126 @@ export function analyzeSleep(sleepRecords: SleepRecord[]): HealthInsight[] {
   return insights;
 }
 
-/**
- * Build comprehensive health context
- */
+export function analyzeConditions(conditions: ConditionInfo[]): HealthInsight[] {
+  const insights: HealthInsight[] = [];
+
+  if (conditions.length === 0) return insights;
+
+  insights.push({
+    type: 'condition' as const,
+    priority: 'medium',
+    title: 'Health Conditions',
+    description: `${conditions.length} condition${conditions.length > 1 ? 's' : ''} on record`,
+    value: conditions.map(c => c.name).join(', '),
+  });
+
+  return insights;
+}
+
+export function analyzeAllergies(allergies: string[]): HealthInsight[] {
+  const insights: HealthInsight[] = [];
+
+  if (allergies.length === 0) return insights;
+
+  insights.push({
+    type: 'allergy' as const,
+    priority: 'high',
+    title: 'Allergies',
+    description: `Patient has ${allergies.length} allergy${allergies.length > 1 ? 's' : ''}`,
+    value: allergies.join(', '),
+  });
+
+  return insights;
+}
+
+export function analyzeHospital(hospital: HospitalInfo): HealthInsight[] {
+  const insights: HealthInsight[] = [];
+
+  if (!hospital.name) return insights;
+
+  insights.push({
+    type: 'hospital' as const,
+    priority: 'medium',
+    title: `Hospital: ${hospital.name}`,
+    description: hospital.address ? `Address: ${hospital.address}` : 'No address specified',
+    value: hospital.fileNumber ?? undefined,
+  });
+
+  return insights;
+}
+
+export function analyzeReporter(reporter: ReporterInfo): HealthInsight[] {
+  const insights: HealthInsight[] = [];
+
+  if (!reporter.name) return insights;
+
+  insights.push({
+    type: 'reporter' as const,
+    priority: 'low',
+    title: `Reporter: ${reporter.name}`,
+    description: `Relationship: ${reporter.relationship ?? 'unknown'}`,
+    value: reporter.isPrimaryContact ? 'Primary contact' : 'Not primary',
+  });
+
+  return insights;
+}
+
+export function analyzeAddress(address: AddressInfo): HealthInsight[] {
+  const insights: HealthInsight[] = [];
+
+  if (!address.detailed) return insights;
+
+  insights.push({
+    type: 'address' as const,
+    priority: 'low',
+    title: 'Address',
+    description: address.detailed,
+    value: undefined,
+  });
+
+  return insights;
+}
+
+export function analyzeEmergency(emergency: EmergencyInfo): HealthInsight[] {
+  const insights: HealthInsight[] = [];
+
+  if (emergency.contacts.length === 0) return insights;
+
+  insights.push({
+    type: 'emergency' as const,
+    priority: 'medium',
+    title: `Emergency Contacts: ${emergency.contacts.length}`,
+    description: `Primary contact: ${emergency.primaryContact?.name ?? 'none'}`,
+    value: undefined,
+  });
+
+  if (emergency.profile) {
+    insights.push({
+      type: 'emergency' as const,
+      priority: 'low',
+      title: 'Emergency Profile',
+      description: emergency.profile,
+      value: undefined,
+    });
+  }
+
+  return insights;
+}
+
+export function analyzeProfileCompletion(profileCompletion: ProfileCompletionInfo): HealthInsight[] {
+  const insights: HealthInsight[] = [];
+
+  insights.push({
+    type: 'profile' as const,
+    priority: profileCompletion.percentage >= 80 ? 'low' : profileCompletion.percentage >= 50 ? 'medium' : 'high',
+    title: `Profile Completion: ${profileCompletion.percentage}%`,
+    description: `Missing: ${profileCompletion.missingFields.join(', ')}`,
+    value: undefined,
+  });
+
+  return insights;
+}
+
 export function buildHealthContext(data: HealthContextData): {
   contextText: string;
   insights: HealthInsight[];
@@ -239,14 +389,19 @@ export function buildHealthContext(data: HealthContextData): {
   allInsights.push(...analyzeAlerts(data.recentAlerts));
   allInsights.push(...analyzeFood(data.foodLogs));
   allInsights.push(...analyzeSleep(data.sleepRecords));
+  allInsights.push(...analyzeConditions(data.conditions));
+  allInsights.push(...analyzeAllergies(data.allergies));
+  allInsights.push(...analyzeHospital(data.hospital));
+  allInsights.push(...analyzeReporter(data.reporter));
+  allInsights.push(...analyzeAddress(data.address));
+  allInsights.push(...analyzeEmergency(data.emergency));
+  allInsights.push(...analyzeProfileCompletion(data.profileCompletion));
 
-  // Sort by priority
   const priorityOrder = { high: 0, medium: 1, low: 2 };
   allInsights.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
 
   const highPriorityCount = allInsights.filter(i => i.priority === 'high').length;
 
-  // Build context text
   const lines: string[] = [];
 
   lines.push(`Patient: ${data.patientName}`);
@@ -275,6 +430,49 @@ export function buildHealthContext(data: HealthContextData): {
     lines.push(`Alerts: ${data.recentAlerts.map(a => a.message).join('; ')}`);
   }
 
+  if (data.conditions.length > 0) {
+    const conditionList = data.conditions.map(c => `${c.name} ${c.severity ?? ''}`).join(', ');
+    lines.push(`Conditions: ${conditionList}`);
+  }
+
+  if (data.allergies.length > 0) {
+    const allergiesList = data.allergies.join(', ');
+    lines.push(`Allergies: ${allergiesList}`);
+  }
+
+  if (data.hospital.name) {
+    lines.push(`Hospital: ${data.hospital.name}`);
+    if (data.hospital.address) lines.push(`Hospital Address: ${data.hospital.address}`);
+    if (data.hospital.phone) lines.push(`Hospital Phone: ${data.hospital.phone}`);
+  }
+
+  if (data.reporter.name) {
+    lines.push(`Reporter: ${data.reporter.name}`);
+    if (data.reporter.relationship) lines.push(`Reporter Relationship: ${data.reporter.relationship}`);
+    if (data.reporter.phone) lines.push(`Reporter Phone: ${data.reporter.phone}`);
+  }
+
+  if (data.address.detailed) {
+    lines.push(`Address: ${data.address.detailed}`);
+  }
+
+  if (data.emergency.contacts.length > 0) {
+    lines.push(`Emergency Contacts: ${data.emergency.contacts.length}`);
+    if (data.emergency.primaryContact) {
+      lines.push(`Primary Emergency Contact: ${data.emergency.primaryContact.name}`);
+    }
+    if (data.emergency.profile) {
+      lines.push(`Emergency Profile: ${data.emergency.profile}`);
+    }
+  }
+
+  if (data.profileCompletion.percentage >= 0) {
+    lines.push(`Profile Completion: ${data.profileCompletion.percentage}%`);
+    if (data.profileCompletion.missingFields.length > 0) {
+      lines.push(`Missing Fields: ${data.profileCompletion.missingFields.join(', ')}`);
+    }
+  }
+
   if (highPriorityCount > 0) {
     lines.push(`⚠️ ${highPriorityCount} high-priority health alerts need attention`);
   }
@@ -286,9 +484,6 @@ export function buildHealthContext(data: HealthContextData): {
   };
 }
 
-/**
- * Format context for AI prompt
- */
 export function formatContextForPrompt(
   data: HealthContextData,
   insights: HealthInsight[]

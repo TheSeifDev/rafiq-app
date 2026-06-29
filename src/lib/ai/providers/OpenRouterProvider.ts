@@ -1,11 +1,3 @@
-/**
- * OpenRouter Provider — Non-streaming implementation for Expo SDK 54.
- *
- * STREAMING REMOVED: React Native fetch does NOT support response.body /
- * ReadableStream / getReader(). All requests use stream:false and parse
- * response.text() → JSON.
- */
-
 import { AIProvider, AIMessage, HealthContext, StreamingCallback, AIProviderError } from './types';
 import { fetchWithRetry, type StreamConfig } from '../streaming';
 import { env } from '../../../config/env';
@@ -27,9 +19,6 @@ interface ProviderHealth {
   consecutiveFailures: number;
 }
 
-/**
- * OpenRouter Provider — production-grade without SDK, non-streaming only.
- */
 class OpenRouterProvider implements AIProvider {
   name = 'OpenRouter';
   id = 'openrouter';
@@ -63,7 +52,6 @@ class OpenRouterProvider implements AIProvider {
 
   async isAvailable(): Promise<boolean> {
     if (!this.apiKey || !this.apiKeyValidated) {
-      // Re-check env in case key was set after init
       const envKey = env.openRouterApiKey;
       if (envKey && envKey.startsWith('sk-or-v1-')) {
         this.resetHealth();
@@ -76,9 +64,6 @@ class OpenRouterProvider implements AIProvider {
     return this.health.isHealthy;
   }
 
-  /**
-   * Non-streaming generate — the only supported path on Expo SDK 54.
-   */
   async generate(
     messages: AIMessage[],
     context: HealthContext
@@ -114,12 +99,6 @@ class OpenRouterProvider implements AIProvider {
     return { role: 'assistant', content };
   }
 
-  /**
-   * Streaming stub — not supported on React Native / Expo SDK 54.
-   *
-   * Falls back to non-streaming generate() and emits a single onChunk call.
-   * This ensures callers that pass onChunk still receive the full response.
-   */
   async generateStreaming(
     messages: AIMessage[],
     context: HealthContext,
@@ -132,7 +111,6 @@ class OpenRouterProvider implements AIProvider {
     );
 
     const result = await this.generate(messages, context);
-    // Emit single full chunk for UI compatibility
     if (result.content) {
       try {
         onChunk(result.content);
@@ -142,8 +120,6 @@ class OpenRouterProvider implements AIProvider {
     }
     return result.content;
   }
-
-  // ── Private helpers ─────────────────────────────────────────────────────────
 
   private async makeRequest(
     messages: AIMessage[],
@@ -181,7 +157,7 @@ class OpenRouterProvider implements AIProvider {
             messages: allMessages,
             max_tokens: 2000,
             temperature: 0.7,
-            stream: false, // Always false — RN fetch has no ReadableStream
+            stream: false,
           }),
           timeout: FETCH_CONFIG.timeoutMs,
         },

@@ -1,22 +1,19 @@
-/**
- * AI Chat Hook
- * Healthcare AI with reasoning persistence and memory.
- *
- * STREAMING REMOVED: Expo SDK 54 React Native fetch does not support
- * ReadableStream. The onChunk callback from aiManager.generate() is
- * called once at completion with the full content.
- *
- * SAVE BUG FIXED: saveState() now receives messages explicitly
- * instead of capturing stale closure state.
- */
-
 import { useState, useCallback, useRef, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { aiManager, type AIResponse, type HealthContextData, type StreamChunk } from '../orchestration';
+import { patientContextAggregator, type PatientContext } from '../../../services/ai/PatientContextAggregator';
 
 const STORAGE_KEY = '@rafiq_ai_state';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+const getUserId = async (): Promise<string | null> => {
+  try {
+    const userId = await AsyncStorage.getItem('@rafiq_userId');
+    return userId;
+  } catch (err) {
+    console.warn('[AI Chat] Failed to get userId:', err);
+    return null;
+  }
+};
 
 export interface ChatMessage {
   id: string;
@@ -42,16 +39,85 @@ export interface AIChatState {
 }
 
 interface UseAICHatOptions {
-  healthContext: HealthContextData;
   isRTL?: boolean;
   onError?: (error: string) => void;
   onProviderChange?: (provider: string) => void;
 }
 
-// ── Hook ──────────────────────────────────────────────────────────────────────
+const convertPatientContextToHealthContext = (pc: PatientContext): HealthContextData => {
+  return {
+    patientName: pc.fullName || 'User',
+    latestVitals: {
+      heartRate: undefined,
+      bloodPressureSys: undefined,
+      bloodPressureDia: undefined,
+      oxygenSaturation: undefined,
+      temperature: undefined,
+    },
+    medications: pc.medications.active.map(m => ({
+      name: m.name,
+      dosage: m.dosage ?? undefined,
+      time: m.time_of_day?.join(', ') ?? undefined,
+      active: m.is_active,
+    })),
+    recentAlerts: [],
+    foodLogs: [],
+    sleepRecords: [],
+    conditions: pc.conditions.list.map(c => ({
+      name: c.name,
+      severity: c.severity,
+      diagnosedDate: c.diagnosedDate,
+      notes: c.notes,
+      isActive: c.isActive,
+    })),
+    allergies: pc.allergies.list,
+    hospital: {
+      name: pc.hospital.name,
+      address: pc.hospital.data.address,
+      phone: pc.hospital.data.phone,
+      hasMedicalFile: pc.hospital.data.hasMedicalFile,
+      fileNumber: pc.hospital.data.fileNumber,
+    },
+    reporter: {
+      name: pc.reporter.data.name,
+      relationship: pc.reporter.relation,
+      phone: pc.reporter.data.phone,
+      isPrimaryContact: pc.reporter.data.isPrimaryContact,
+    },
+    address: {
+      city: pc.address.city,
+      area: pc.address.area,
+      detailed: pc.address.detailed,
+      geocoded: pc.address.geocoded,
+    },
+    emergency: {
+      contacts: pc.emergency.contacts.map(c => ({
+        name: c.name,
+        relation: c.relation,
+        phone: c.phone,
+        isPrimary: !!c.is_primary,
+      })),
+      primaryContact: pc.emergency.primaryContact
+        ? {
+            name: pc.emergency.primaryContact.name,
+            relation: pc.emergency.primaryContact.relation,
+            phone: pc.emergency.primaryContact.phone,
+            isPrimary: !!pc.emergency.primaryContact.is_primary,
+          }
+        : null,
+      profile: pc.emergency.profile,
+    },
+    profileCompletion: {
+      percentage: pc.profileCompletion.percentage,
+      completedFields: pc.profileCompletion.completedFields,
+      missingFields: pc.profileCompletion.missingFields,
+      readinessScore: pc.profileCompletion.readinessScore,
+    },
+    lastUpdated: new Date().toISOString(),
+  };
+};
 
 export function useAICHat({
-  healthContext,
   isRTL = false,
   onError,
   onProviderChange,
@@ -67,18 +133,11 @@ export function useAICHat({
   });
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const initializedRef = useRef(false);
 
-  // Initialize AI manager with health context
-  useEffect(() => {
-    aiManager.initialize(healthContext);
-  }, [healthContext]);
-
-  // Load persisted state on mount
   useEffect(() => {
     loadPersistedState();
   }, []);
-
-  // ── Persistence helpers ───────────────────────────────────────────────────
 
   const loadPersistedState = async () => {
     try {
@@ -98,11 +157,6 @@ export function useAICHat({
     }
   };
 
-  /**
-   * Persist messages to AsyncStorage.
-   * Receives the message list explicitly to avoid stale closures.
-   * Failure is isolated — it must never crash a successful generation.
-   */
   const persistMessages = async (messages: ChatMessage[]): Promise<void> => {
     try {
       const toSave = messages.slice(-50).map(m => ({
@@ -113,15 +167,12 @@ export function useAICHat({
       }));
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ messages: toSave }));
     } catch (err) {
-      // Isolated: log but do not propagate
       console.error('[AI Chat] Persistence failed (non-fatal):', {
         message: (err as Error).message,
         location: 'persistMessages',
       });
     }
   };
-
-  // ── Clear memory ──────────────────────────────────────────────────────────
 
   const clearMemory = useCallback(async () => {
     aiManager.clearMemory();
@@ -138,11 +189,8 @@ export function useAICHat({
     }
   }, []);
 
-  // ── Send message ──────────────────────────────────────────────────────────
-
   const sendMessage = useCallback(
     async (content: string) => {
-      // Cancel any in-flight request
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -164,7 +212,6 @@ export function useAICHat({
         isStreaming: true,
       };
 
-      // Add user message + placeholder immediately
       setState(prev => ({
         ...prev,
         messages: [...prev.messages, userMessage, assistantPlaceholder],
@@ -175,19 +222,34 @@ export function useAICHat({
       }));
 
       try {
-        // aiManager.generate() is non-streaming on Expo SDK 54.
-        // The onChunk callback receives the full content once at completion.
+        const userId = await getUserId();
+        let healthContextToUse: HealthContextData | undefined;
+        if (userId) {
+          const patientContext = await patientContextAggregator.aggregate(userId);
+          healthContextToUse = convertPatientContextToHealthContext(patientContext);
+        } else {
+          if (!initializedRef.current) {
+            aiManager.initialize({} as HealthContextData);
+            initializedRef.current = true;
+          }
+        }
+
+        if (healthContextToUse) {
+          if (!initializedRef.current) {
+            aiManager.initialize(healthContextToUse);
+            initializedRef.current = true;
+          } else {
+            aiManager.updateHealthContext(healthContextToUse);
+          }
+        }
+
         const response: AIResponse = await aiManager.generate(
           content,
-          (_chunk: StreamChunk) => {
-            // No-op: content is applied from the resolved Promise below.
-            // This callback is here for interface compatibility.
-          }
+          (_chunk: StreamChunk) => {},
         );
 
         const suggestedReplies = generateSuggestions(content, response.content, isRTL);
 
-        // Build the finalized assistant message
         const finalAssistant: ChatMessage = {
           id: assistantId,
           role: 'assistant',
@@ -201,13 +263,11 @@ export function useAICHat({
           tokensPerSecond: response.tokensPerSecond,
         };
 
-        // Update state with finalized messages
         setState(prev => {
           const updatedMessages = prev.messages.map(m =>
             m.id === assistantId ? finalAssistant : m
           );
 
-          // Isolated persistence — must not block or crash UI update
           persistMessages(updatedMessages);
 
           return {
@@ -223,7 +283,6 @@ export function useAICHat({
 
         onProviderChange?.(response.provider);
       } catch (err: any) {
-        // Aborts are silent
         if (err?.name === 'AbortError' || err?.message?.includes('Aborted')) {
           setState(prev => ({
             ...prev,
@@ -256,7 +315,7 @@ export function useAICHat({
                   ...m,
                   isStreaming: false,
                   content: isRTL
-                    ? 'عذراً، حدث خطأ في الاتصال. يرجى المحاولة مرة أخرى.'
+                    ? '\u0639\u0630\u0631\u0627\u064b\u060c \u062d\u062f\u062b \u062e\u0637\u0623 \u0641\u064a \u0627\u0644\u0627\u062a\u0635\u0627\u0644. \u064a\u0631\u062c\u0649 \u0627\u0644\u0645\u062d\u0627\u0648\u0644\u0629 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.'
                     : 'Sorry, there was a connection error. Please try again.',
                 }
               : m
@@ -268,8 +327,6 @@ export function useAICHat({
     },
     [isRTL, onError, onProviderChange]
   );
-
-  // ── Cancel ────────────────────────────────────────────────────────────────
 
   const cancelRequest = useCallback(() => {
     if (abortControllerRef.current) {
@@ -288,8 +345,6 @@ export function useAICHat({
     }
   }, []);
 
-  // ── Quick reply ───────────────────────────────────────────────────────────
-
   const selectSuggestion = useCallback(
     async (suggestion: string) => {
       await sendMessage(suggestion);
@@ -306,8 +361,6 @@ export function useAICHat({
   };
 }
 
-// ── Suggestion generator ──────────────────────────────────────────────────────
-
 function generateSuggestions(
   userMessage: string,
   _response: string,
@@ -315,39 +368,39 @@ function generateSuggestions(
 ): string[] {
   const lower = userMessage.toLowerCase();
 
-  if (lower.includes('heart') || lower.includes('نبض') || lower.includes('pulse')) {
+  if (lower.includes('heart') || lower.includes('\u0646\u0628\u0636') || lower.includes('pulse')) {
     return isRTL
-      ? ['ما هو المعدل الطبيعي؟', 'كيف أقيس نبضي؟', 'متى أقلق؟']
+      ? ['\u0645\u0627 \u0647\u0648 \u0627\u0644\u0645\u0639\u062f\u0644 \u0627\u0644\u0637\u0628\u064a\u0639\u064a\u061f', '\u0643\u064a\u0641 \u0623\u0642\u064a\u0633 \u0646\u0628\u0636\u064a\u061f', '\u0645\u062a\u0649 \u0623\u0642\u0644\u0642\u061f']
       : ['What is normal rate?', 'How do I measure?', 'When to worry?'];
   }
-  if (lower.includes('medication') || lower.includes('دواء') || lower.includes('medicine')) {
+  if (lower.includes('medication') || lower.includes('\u062f\u0648\u0627\u0621') || lower.includes('medicine')) {
     return isRTL
-      ? ['تذكير بالأدوية', 'الآثار الجانبية', 'هل يمكنني التوقف؟']
+      ? ['\u062a\u0630\u0643\u064a\u0631 \u0628\u0627\u0644\u0623\u062f\u0648\u064a\u0629', '\u0627\u0644\u0622\u062b\u0627\u0631 \u0627\u0644\u062c\u0627\u0646\u0628\u064a\u0629', '\u0647\u0644 \u064a\u0645\u0643\u0646\u0646\u064a \u0627\u0644\u062a\u0648\u0642\u0641\u061f']
       : ['Remind me', 'Side effects?', 'Can I stop?'];
   }
-  if (lower.includes('blood pressure') || lower.includes('ضغط')) {
+  if (lower.includes('blood pressure') || lower.includes('\u0636\u063a\u0637')) {
     return isRTL
-      ? ['ما هو الضغط الطبيعي؟', 'كيف أتحكم بالضغط؟', 'هل أحتاج دواء؟']
+      ? ['\u0645\u0627 \u0647\u0648 \u0627\u0644\u0636\u063a\u0637 \u0627\u0644\u0637\u0628\u064a\u0639\u064a\u061f', '\u0643\u064a\u0641 \u0623\u062a\u062d\u0643\u0645 \u0628\u0627\u0644\u0636\u063a\u0637\u061f', '\u0647\u0644 \u0623\u062d\u062a\u0627\u062c \u062f\u0648\u0627\u0621\u061f']
       : ['What is normal?', 'How to manage?', 'Do I need medicine?'];
   }
-  if (lower.includes('sleep') || lower.includes('نوم')) {
+  if (lower.includes('sleep') || lower.includes('\u0646\u0648\u0645')) {
     return isRTL
-      ? ['نصائح للنوم', 'كم ساعة أنام؟', 'ما أسباب الأرق؟']
+      ? ['\u0646\u0635\u0627\u0626\u062d \u0644\u0644\u0646\u0648\u0645', '\u0643\u0645 \u0633\u0627\u0639\u0629 \u0623\u0646\u0627\u0645\u061f', '\u0645\u0627 \u0623\u0633\u0628\u0627\u0628 \u0627\u0644\u0623\u0631\u0642\u061f']
       : ['Sleep tips', 'Hours needed?', 'Causes of insomnia?'];
   }
-  if (lower.includes('food') || lower.includes('طعام')) {
+  if (lower.includes('food') || lower.includes('\u0637\u0639\u0627\u0645')) {
     return isRTL
-      ? ['وجبات صحية', 'أطعمة يجب تجنبها', 'نصائح غذائية']
+      ? ['\u0648\u062c\u0628\u0627\u062a \u0635\u062d\u064a\u0629', '\u0623\u0637\u0639\u0645\u0629 \u064a\u062c\u0628 \u062a\u062c\u0646\u0628\u0647\u0627', '\u0646\u0635\u0627\u0626\u062d \u063a\u0630\u0627\u0626\u064a\u0629']
       : ['Healthy meals', 'Foods to avoid', 'Nutrition tips'];
   }
-  if (lower.includes('fever') || lower.includes('حرارة') || lower.includes('حمى')) {
+  if (lower.includes('fever') || lower.includes('\u062d\u0631\u0627\u0631\u0629') || lower.includes('\u062d\u0645\u0649')) {
     return isRTL
-      ? ['ماذا أفعل؟', 'متى أذهب للطبيب؟', 'كيف أخفض الحرارة؟']
+      ? ['\u0645\u0627\u0630\u0627 \u0623\u0641\u0639\u0644\u061f', '\u0645\u062a\u0649 \u0623\u0630\u0647\u0628 \u0644\u0644\u0637\u0628\u064a\u0628\u061f', '\u0643\u064a\u0641 \u0623\u062e\u0641\u0636 \u0627\u0644\u062d\u0631\u0627\u0631\u0629\u061f']
       : ['What to do?', 'When to see doctor?', 'How to reduce fever?'];
   }
 
   return isRTL
-    ? ['أخبرني أكثر', 'نصائح صحية', 'أدويتي؟']
+    ? ['\u0623\u062e\u0628\u0631\u0646\u064a \u0623\u0643\u062b\u0631', '\u0646\u0635\u0627\u0626\u062d \u0635\u062d\u064a\u0629', '\u0623\u062f\u0648\u064a\u062a\u064a\u061f']
     : ['Tell me more', 'Health tips', 'My medications?'];
 }
 

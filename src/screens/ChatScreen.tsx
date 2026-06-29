@@ -1,8 +1,3 @@
-/**
- * ChatScreen — Premium Healthcare AI Assistant
- * ChatGPT-quality mobile experience
- */
-
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   View,
@@ -31,11 +26,56 @@ import { medicationService } from "../services/medication.service";
 import { parseMedicationTimes, formatMedicationTime } from "../lib/medications/medicationSchedule";
 import { getChatTheme, type ChatTheme } from "../theme/chatTheme";
 import { HealthContextData } from "../lib/ai/orchestration";
-import { env, logEnvStatus } from "../config/env";
+import { aiManager } from "../lib/ai/orchestration";
+import { env, logStatus } from "../config/env";
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Premium Header
-// ═══════════════════════════════════════════════════════════════════════════
+const DEFAULT_HEALTH_CONTEXT: HealthContextData = {
+  patientName: "User",
+  latestVitals: {
+    heartRate: 0,
+    bloodPressureSys: 0,
+    bloodPressureDia: 0,
+    oxygenSaturation: 0,
+    temperature: 0,
+  },
+  medications: [],
+  recentAlerts: [],
+  foodLogs: [],
+  sleepRecords: [],
+  conditions: [],
+  allergies: [],
+  hospital: {
+    name: null,
+    address: null,
+    phone: null,
+    hasMedicalFile: null,
+    fileNumber: null,
+  },
+  reporter: {
+    name: null,
+    relationship: null,
+    phone: null,
+    isPrimaryContact: null,
+  },
+  address: {
+    city: null,
+    area: null,
+    detailed: null,
+    geocoded: null,
+  },
+  emergency: {
+    contacts: [],
+    primaryContact: null,
+    profile: null,
+  },
+  profileCompletion: {
+    percentage: 0,
+    completedFields: [],
+    missingFields: [],
+    readinessScore: 0,
+  },
+  lastUpdated: new Date().toISOString(),
+};
 
 function PremiumHeader({ isRTL, theme }: { isRTL: boolean; theme: ChatTheme }) {
   return (
@@ -51,7 +91,7 @@ function PremiumHeader({ isRTL, theme }: { isRTL: boolean; theme: ChatTheme }) {
           <View style={styles.statusRow}>
             <View style={[styles.statusDot, { backgroundColor: theme.online }]} />
             <Text style={[styles.statusText, { color: theme.textSecondary }]}>
-              {isRTL ? 'المساعد الطبي الذكي · متصل' : 'Medical AI Assistant · Online'}
+              {isRTL ? '\u0627\u0644\u0645\u0633\u0627\u0639\u062f \u0627\u0644\u0637\u0628\u064a \u0627\u0644\u0630\u0643\u064a \u00b7 \u0645\u062a\u0635\u0644' : 'Medical AI Assistant \u00b7 Online'}
             </Text>
           </View>
         </View>
@@ -59,10 +99,6 @@ function PremiumHeader({ isRTL, theme }: { isRTL: boolean; theme: ChatTheme }) {
     </View>
   );
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Premium AI Message Bubble
-// ═══════════════════════════════════════════════════════════════════════════
 
 function AIBubble({
   content,
@@ -75,21 +111,12 @@ function AIBubble({
   isRTL: boolean;
   theme: ChatTheme;
 }) {
-  // FIX 1 – no empty ghost bubble while the AI hasn't typed anything yet;
-  // the ThinkingIndicator (dots) handles that phase instead.
   if (!content && isStreaming) return null;
 
   return (
     <View style={[styles.aiMessageRow, isRTL && styles.aiMessageRowRTL]}>
       <View style={[styles.aiAvatar, { backgroundColor: theme.primarySoft }]}>
-        {/*
-         * TODO: Replace with AI avatar image, e.g.:
-         * <Image
-         *   source={require('../assets/ai-avatar.png')}
-         *   style={{ width: 22, height: 22, borderRadius: 11 }}
-         * />
-         */}
-        <Text style={styles.aiAvatarIcon}>🏥</Text>
+        <Text style={styles.aiAvatarIcon}>{'\uD83C\uDFE5'}</Text>
       </View>
 
       <View style={[
@@ -108,19 +135,7 @@ function AIBubble({
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Premium User Message Bubble
-// ═══════════════════════════════════════════════════════════════════════════
-
-function UserBubble({
-  content,
-  isRTL,
-  theme,
-}: {
-  content: string;
-  isRTL: boolean;
-  theme: ChatTheme;
-}) {
+function UserBubble({ content, isRTL, theme }: { content: string; isRTL: boolean; theme: ChatTheme }) {
   return (
     <View style={[styles.userMessageRow, isRTL && styles.userMessageRowRTL]}>
       <View style={[styles.userBubble, { backgroundColor: theme.userBubble }]}>
@@ -132,10 +147,6 @@ function UserBubble({
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Premium Thinking Indicator  (staggered dots)
-// ═══════════════════════════════════════════════════════════════════════════
-
 function ThinkingIndicator({ isRTL, theme }: { isRTL: boolean; theme: ChatTheme }) {
   const dot1 = React.useRef(new Animated.Value(0.3)).current;
   const dot2 = React.useRef(new Animated.Value(0.3)).current;
@@ -146,7 +157,7 @@ function ThinkingIndicator({ isRTL, theme }: { isRTL: boolean; theme: ChatTheme 
       Animated.loop(
         Animated.sequence([
           Animated.delay(delay),
-          Animated.timing(anim, { toValue: 1,   duration: 350, useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 1, duration: 350, useNativeDriver: true }),
           Animated.timing(anim, { toValue: 0.3, duration: 350, useNativeDriver: true }),
         ])
       );
@@ -161,14 +172,7 @@ function ThinkingIndicator({ isRTL, theme }: { isRTL: boolean; theme: ChatTheme 
   return (
     <View style={[styles.thinkingRow, isRTL && styles.thinkingRowRTL]}>
       <View style={[styles.thinkingAvatar, { backgroundColor: theme.primarySoft }]}>
-        {/*
-         * TODO: Replace with AI avatar image, e.g.:
-         * <Image
-         *   source={require('../assets/ai-avatar.png')}
-         *   style={{ width: 22, height: 22, borderRadius: 11 }}
-         * />
-         */}
-        <Text style={styles.thinkingIcon}>🏥</Text>
+        <Text style={styles.thinkingIcon}>{'\uD83C\uDFE5'}</Text>
       </View>
       <View style={[styles.thinkingDots, { backgroundColor: theme.aiBubble }]}>
         <Animated.View style={[styles.thinkDot, { opacity: dot1, backgroundColor: theme.thinking }]} />
@@ -178,12 +182,6 @@ function ThinkingIndicator({ isRTL, theme }: { isRTL: boolean; theme: ChatTheme 
     </View>
   );
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// WhatsApp-style Input Bar
-// FIX 2 – transparent background, clean pill shape, send icon only
-// FIX 5 – no extra buttons, just TextInput + send
-// ═══════════════════════════════════════════════════════════════════════════
 
 function PremiumInput({
   onSend,
@@ -205,7 +203,7 @@ function PremiumInput({
 
     Animated.sequence([
       Animated.spring(sendAnim, { toValue: 0.75, useNativeDriver: true, speed: 120 }),
-      Animated.spring(sendAnim, { toValue: 1,    useNativeDriver: true, speed: 80, bounciness: 8 }),
+      Animated.spring(sendAnim, { toValue: 1, useNativeDriver: true, speed: 80, bounciness: 8 }),
     ]).start();
 
     onSend(text.trim());
@@ -213,7 +211,6 @@ function PremiumInput({
   };
 
   return (
-    // FIX 2 – no backgroundColor on the outer wrapper → transparent
     <View style={[styles.inputContainer, { borderTopColor: theme.border }]}>
       <View style={[
         styles.inputWrapper,
@@ -225,7 +222,7 @@ function PremiumInput({
         <TextInput
           value={text}
           onChangeText={setText}
-          placeholder={isRTL ? 'رسالة...' : 'Message...'}
+          placeholder={isRTL ? '\u0631\u0633\u0627\u0644\u0629...' : 'Message...'}
           placeholderTextColor={theme.inputPlaceholder}
           multiline
           maxLength={1000}
@@ -261,13 +258,9 @@ function PremiumInput({
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Empty State
-// ═══════════════════════════════════════════════════════════════════════════
-
 function EmptyState({ onSelect, isRTL, theme }: { onSelect: (msg: string) => void; isRTL: boolean; theme: ChatTheme }) {
   const suggestions = isRTL
-    ? ['تذكير بالأدوية', 'نبض القلب', 'قياس الحرارة', 'وجبات صحية']
+    ? ['\u062a\u0630\u0643\u064a\u0631 \u0628\u0627\u0644\u0623\u062f\u0648\u064a\u0629', '\u0646\u0628\u0636 \u0627\u0644\u0642\u0644\u0628', '\u0642\u064a\u0627\u0633 \u0627\u0644\u062d\u0631\u0627\u0631\u0629', '\u0648\u062c\u0628\u0627\u062a \u0635\u062d\u064a\u0629']
     : ['Med reminder', 'Heart rate', 'Check fever', 'Healthy meals'];
 
   return (
@@ -277,11 +270,11 @@ function EmptyState({ onSelect, isRTL, theme }: { onSelect: (msg: string) => voi
       </View>
 
       <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>
-        {isRTL ? 'مساعدك الصحي الذكي' : 'Your Health Assistant'}
+        {isRTL ? '\u0645\u0633\u0627\u0639\u062f\u0643 \u0627\u0644\u0635\u062d\u064a \u0627\u0644\u0630\u0643\u064a' : 'Your Health Assistant'}
       </Text>
 
       <Text style={[styles.emptySubtitle, { color: theme.textSecondary }]}>
-        {isRTL ? 'اسألني عن صحتك...' : 'Ask me about your health...'}
+        {isRTL ? '\u0627\u0633\u0623\u0644\u0646\u064a \u0639\u0646 \u0635\u062d\u062a\u0643...' : 'Ask me about your health...'}
       </Text>
 
       <View style={[styles.suggestionGrid, isRTL && styles.suggestionGridRTL]}>
@@ -299,10 +292,6 @@ function EmptyState({ onSelect, isRTL, theme }: { onSelect: (msg: string) => voi
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Main Screen
-// ═══════════════════════════════════════════════════════════════════════════
-
 export function ChatScreen(): React.JSX.Element {
   const { isRTL } = useLocale();
   const session = useAuthStore((s) => s.session);
@@ -312,27 +301,17 @@ export function ChatScreen(): React.JSX.Element {
 
   let tabH = 0;
   try {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
     tabH = useBottomTabBarHeight();
   } catch {
     tabH = Platform.OS === "ios" ? 83 : 62;
   }
-  // Ensure a safe minimum for edge cases
   const bottomOffset = Math.max(tabH, Platform.OS === 'ios' ? 83 : 62) + insets.bottom;
 
-  const [healthContext, setHealthContext] = useState<HealthContextData>({
-    patientName: "User",
-    latestVitals: {},
-    medications: [],
-    recentAlerts: [],
-    foodLogs: [],
-    sleepRecords: [],
-    lastUpdated: new Date().toISOString(),
-  });
+  const [healthContext, setHealthContext] = useState<HealthContextData>(DEFAULT_HEALTH_CONTEXT);
 
   const listRef = useRef<FlatList>(null);
 
-  useEffect(() => { logEnvStatus(); }, []);
+  useEffect(() => { logStatus(); }, []);
 
   useEffect(() => {
     let alive = true;
@@ -360,16 +339,48 @@ export function ChatScreen(): React.JSX.Element {
           setHealthContext({
             patientName: profile.full_name || "User",
             latestVitals: {
-              heartRate:        latestVitals?.heart_rate                ?? undefined,
-              bloodPressureSys: latestVitals?.blood_pressure_systolic   ?? undefined,
-              bloodPressureDia: latestVitals?.blood_pressure_diastolic  ?? undefined,
-              oxygenSaturation: latestVitals?.oxygen_saturation         ?? undefined,
-              temperature:      latestVitals?.temperature               ?? undefined,
+              heartRate: latestVitals?.heart_rate ?? 0,
+              bloodPressureSys: latestVitals?.blood_pressure_systolic ?? 0,
+              bloodPressureDia: latestVitals?.blood_pressure_diastolic ?? 0,
+              oxygenSaturation: latestVitals?.oxygen_saturation ?? 0,
+              temperature: latestVitals?.temperature ?? 0,
             },
             medications,
             recentAlerts: [],
             foodLogs: [],
             sleepRecords: [],
+            conditions: [],
+            allergies: [],
+            hospital: {
+              name: null,
+              address: null,
+              phone: null,
+              hasMedicalFile: null,
+              fileNumber: null,
+            },
+            reporter: {
+              name: null,
+              relationship: null,
+              phone: null,
+              isPrimaryContact: null,
+            },
+            address: {
+              city: null,
+              area: null,
+              detailed: null,
+              geocoded: null,
+            },
+            emergency: {
+              contacts: [],
+              primaryContact: null,
+              profile: null,
+            },
+            profileCompletion: {
+              percentage: 0,
+              completedFields: [],
+              missingFields: [],
+              readinessScore: 0,
+            },
             lastUpdated: new Date().toISOString(),
           });
         }
@@ -382,14 +393,15 @@ export function ChatScreen(): React.JSX.Element {
     return () => { alive = false; };
   }, [session?.user.id]);
 
+  useEffect(() => {
+    aiManager.updateHealthContext(healthContext);
+  }, [healthContext]);
+
   const { messages, isLoading, isStreaming, sendMessage } = useAICHat({
-    healthContext,
     isRTL,
     onError: (err) => console.log("[Chat] Error:", err),
   });
 
-  // FIX 1 – show the dots ONLY while AI hasn't produced any text yet.
-  // Once streaming starts (content exists) the AIBubble takes over.
   const lastMsg = messages[messages.length - 1];
   const showThinking =
     (isLoading || isStreaming) &&
@@ -425,11 +437,6 @@ export function ChatScreen(): React.JSX.Element {
         backgroundColor={theme.surface}
       />
 
-      {/*
-        FIX 4 – behavior="padding" on BOTH platforms gives the WhatsApp
-        "input rises with keyboard" feel.
-        Adjust keyboardVerticalOffset to match your navigation header height.
-      */}
       <KeyboardAvoidingView
         style={[styles.flex, { backgroundColor: theme.background }]}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -453,7 +460,6 @@ export function ChatScreen(): React.JSX.Element {
           showsVerticalScrollIndicator={false}
         />
 
-        {/* Dots – only during the silent loading phase */}
         {showThinking && (
           <View style={styles.thinkingContainer}>
             <ThinkingIndicator isRTL={isRTL} theme={theme} />
@@ -473,14 +479,9 @@ export function ChatScreen(): React.JSX.Element {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Styles
-// ═══════════════════════════════════════════════════════════════════════════
-
 const styles = StyleSheet.create({
   flex: { flex: 1 },
 
-  // ── Header ──────────────────────────────────────────────────────────────
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -505,10 +506,8 @@ const styles = StyleSheet.create({
   statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 4 },
   statusText: { fontSize: 12 },
 
-  // ── List ────────────────────────────────────────────────────────────────
   listContent: { paddingTop: 16, paddingHorizontal: 16, flexGrow: 1 },
 
-  // ── AI Bubble ───────────────────────────────────────────────────────────
   aiMessageRow: { flexDirection: 'row', marginBottom: 12 },
   aiMessageRowRTL: { flexDirection: 'row-reverse' },
   aiAvatar: {
@@ -531,7 +530,6 @@ const styles = StyleSheet.create({
   aiText: { fontSize: 15, lineHeight: 22 },
   cursorBlock: { width: 2, height: 16, borderRadius: 1, marginTop: 4 },
 
-  // ── User Bubble ─────────────────────────────────────────────────────────
   userMessageRow: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 12 },
   userMessageRowRTL: { justifyContent: 'flex-start' },
   userBubble: {
@@ -540,7 +538,6 @@ const styles = StyleSheet.create({
   },
   userText: { fontSize: 15, lineHeight: 22 },
 
-  // ── Thinking ────────────────────────────────────────────────────────────
   thinkingContainer: { paddingBottom: 4 },
   thinkingRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 16 },
   thinkingRowRTL: { flexDirection: 'row-reverse' },
@@ -555,12 +552,10 @@ const styles = StyleSheet.create({
   },
   thinkDot: { width: 7, height: 7, borderRadius: 3.5, marginHorizontal: 3 },
 
-  // ── Input (FIX 2 – transparent bg, clean pill) ──────────────────────────
   inputContainer: {
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    // No backgroundColor → inherits transparent from parent
   },
   inputWrapper: {
     flexDirection: 'row',
@@ -585,7 +580,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', marginLeft: 4,
   },
 
-  // ── Empty State ─────────────────────────────────────────────────────────
   emptyContainer: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
     paddingTop: 100, paddingHorizontal: 32,
@@ -601,5 +595,3 @@ const styles = StyleSheet.create({
   suggestionChip: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1 },
   suggestionText: { fontSize: 13, fontWeight: '500' },
 });
-
-export default ChatScreen;

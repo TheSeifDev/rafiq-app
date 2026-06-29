@@ -1,14 +1,3 @@
-/**
- * Health Engine — Vital Status Classification + Medical Confidence Scoring
- *
- * Architecture:
- *   Sensor Data → HealthEngine.analyze() → Status + Anomaly + Emergency + Confidence
- *
- * All vitals are classified into status ranges.
- * Anomalies track consecutive abnormal readings.
- * Emergency thresholds trigger critical alerts.
- * Confidence scoring weights sensor reliability, temporal freshness, and artifact detection.
- */
 import type { VitalsReading } from '../services/wearable/ble.service';
 
 export type VitalStatus = 'normal' | 'elevated' | 'critical' | 'degraded' | 'unknown';
@@ -33,28 +22,22 @@ export interface HealthAnalysis {
   confidence: ConfidenceScore;
 }
 
-// ─── Confidence Scoring ─────────────────────────────────────────────
-
 export type ConfidenceLevel = 'high' | 'medium' | 'low' | 'unknown';
 
 export interface ConfidenceScore {
-  overall: number; // 0-100
+  overall: number;
   level: ConfidenceLevel;
-  sensorReliability: number;  // 0-100: based on signal quality, battery level
-  temporalFreshness: number;  // 0-100: based on data age (fresh = high confidence)
-  artifactScore: number;      // 0-100: based on motion/stability artifacts
+  sensorReliability: number;
+  temporalFreshness: number;
+  artifactScore: number;
   isStale: boolean;
-  reasons: string[];          // Human-readable reasons for reduced confidence
+  reasons: string[];
 }
 
 export interface VitalReadingWithMeta extends VitalsReading {
-  /** BLE RSSI signal strength in dBm */
   signalStrength?: number;
-  /** Device-reported motion artifact during reading */
   hasMotionArtifact?: boolean;
-  /** Device-reported battery level (0-100) */
   batteryLevel?: number;
-  /** Whether this reading came from a simulated device */
   is_simulated?: boolean;
 }
 
@@ -64,7 +47,6 @@ export function computeConfidenceScore(reading: VitalReadingWithMeta): Confidenc
   let temporalFreshness = 100;
   let artifactScore = 100;
 
-  // ── Sensor reliability (battery + signal strength) ──
   if (reading.batteryLevel != null && reading.batteryLevel < 20) {
     sensorReliability -= 30;
     reasons.push('Low battery may affect sensor accuracy');
@@ -88,7 +70,6 @@ export function computeConfidenceScore(reading: VitalReadingWithMeta): Confidenc
 
   sensorReliability = Math.max(0, sensorReliability);
 
-  // ── Temporal freshness ──
   const now = Date.now();
   const age = reading.timestamp ? now - reading.timestamp : Infinity;
 
@@ -106,7 +87,6 @@ export function computeConfidenceScore(reading: VitalReadingWithMeta): Confidenc
     reasons.push('Reading is moderately fresh');
   }
 
-  // ── Artifact score ──
   if (reading.hasMotionArtifact) {
     artifactScore -= 50;
     reasons.push('Motion artifact detected during measurement');
@@ -128,7 +108,6 @@ export function computeConfidenceScore(reading: VitalReadingWithMeta): Confidenc
 
   artifactScore = Math.max(0, artifactScore);
 
-  // ── Overall: weighted average ──
   const overall = Math.round(
     sensorReliability * 0.25 +
     temporalFreshness * 0.40 +
@@ -144,8 +123,6 @@ export function computeConfidenceScore(reading: VitalReadingWithMeta): Confidenc
 
   return { overall, level, sensorReliability, temporalFreshness, artifactScore, isStale, reasons };
 }
-
-// ─── Emergency threshold check (with confidence override) ──
 
 export interface EmergencyCheck {
   shouldAlert: boolean;
@@ -194,14 +171,12 @@ export function getConfidenceLabel(level: ConfidenceLevel, isAr = false): string
   }
 }
 
-// ─── Thresholds ────────────────────────────────────────────────
-
 const THRESHOLDS = {
   heart_rate: {
-    normal: { min: 50, max: 100 },
-    elevated: { min: 100, max: 120 },
-    critical: 120,
-    degradedBelow: 45,
+    normal: { min: 60, max: 100 },
+    elevated: { min: 100, max: 130 },
+    critical: 140,
+    degradedBelow: 50,
     unit: 'bpm',
   },
   spo2: {
@@ -226,9 +201,9 @@ const THRESHOLDS = {
     unit: 'mmHg',
   },
   temperature: {
-    normal: { min: 36.0, max: 37.2 },
-    elevated: { min: 37.2, max: 38.0 },
-    critical: 38.0,
+    normal: { min: 36.0, max: 37.5 },
+    elevated: { min: 37.5, max: 38.5 },
+    critical: 39.0,
     degradedBelow: 35.5,
     unit: '°C',
   },
@@ -238,8 +213,6 @@ const THRESHOLDS = {
     unit: 'steps',
   },
 } as const;
-
-// ─── Anomaly Tracker ───────────────────────────────────────────
 
 interface AnomalyState {
   count: number;
@@ -274,8 +247,6 @@ export function getAnomalyDuration(type: VitalType): number | null {
     ? Date.now() - anomalyHistory.get(type)!.startedAt!
     : null;
 }
-
-// ─── Per-vital analysis ────────────────────────────────────────
 
 function analyzeHeartRate(hr: number | null): VitalAnalysis {
   if (hr == null) return makeUnknown('heart_rate', 'bpm');
@@ -375,8 +346,6 @@ function makeUnknown(type: VitalType, unit: string): VitalAnalysis {
   return { status: 'unknown', value: null, unit, threshold: 0, severity: 'low', message: 'No data available' };
 }
 
-// ─── Main analyzer (with confidence) ─────────────────────────────────────────────
-
 export function analyzeVitals(reading: VitalReadingWithMeta): HealthAnalysis {
   const hr = analyzeHeartRate(reading.heart_rate ?? null);
   const spo2 = analyzeSpO2(reading.oxygen_saturation ?? null);
@@ -430,8 +399,6 @@ export function analyzeVitals(reading: VitalReadingWithMeta): HealthAnalysis {
     confidence,
   };
 }
-
-// ─── Stale detection ─────────────────────────────────────────────
 
 export function isVitalsStale(reading: VitalsReading, maxAgeMs = 15 * 60 * 1000): boolean {
   if (!reading.timestamp) return true;

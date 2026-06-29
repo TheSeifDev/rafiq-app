@@ -1,8 +1,3 @@
-/**
- * Reasoning Engine
- * Handles reasoning persistence and continuity for OpenRouter models
- */
-
 export interface ReasoningMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -23,9 +18,6 @@ export interface ReasoningState {
 const DEFAULT_MAX_TOKENS = 32000;
 const DEFAULT_MAX_REASONING_TOKENS = 8000;
 
-/**
- * Create a new reasoning state
- */
 export function createReasoningState(): ReasoningState {
   return {
     messages: [],
@@ -37,16 +29,10 @@ export function createReasoningState(): ReasoningState {
   };
 }
 
-/**
- * Calculate token count (approximate)
- */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-/**
- * Add user message to reasoning state
- */
 export function addUserMessage(
   state: ReasoningState,
   content: string,
@@ -66,9 +52,6 @@ export function addUserMessage(
   };
 }
 
-/**
- * Add assistant message with reasoning to state
- */
 export function addAssistantMessage(
   state: ReasoningState,
   content: string,
@@ -93,9 +76,6 @@ export function addAssistantMessage(
   };
 }
 
-/**
- * Extract topic from user message
- */
 export function extractTopic(message: string): string | null {
   const topics = [
     'heart', 'heart rate', 'pulse', 'نبض',
@@ -121,9 +101,6 @@ export function extractTopic(message: string): string | null {
   return null;
 }
 
-/**
- * Prune messages to stay within token budget
- */
 export function pruneForTokenBudget(
   state: ReasoningState,
   maxTotalTokens: number = 28000
@@ -131,7 +108,6 @@ export function pruneForTokenBudget(
   let totalTokens = 0;
   const prunedMessages: ReasoningMessage[] = [];
 
-  // Work backwards from most recent
   for (let i = state.messages.length - 1; i >= 0; i--) {
     const msg = state.messages[i];
     const msgTokens = estimateTokens(msg.content) + (msg.reasoningDetails ? estimateTokens(msg.reasoningDetails) : 0);
@@ -144,7 +120,6 @@ export function pruneForTokenBudget(
     totalTokens += msgTokens;
   }
 
-  // Keep at least last 6 messages
   if (prunedMessages.length < 6 && state.messages.length >= 6) {
     const lastSix = state.messages.slice(-6);
     return {
@@ -159,15 +134,11 @@ export function pruneForTokenBudget(
   };
 }
 
-/**
- * Build OpenRouter messages with reasoning
- */
 export function buildOpenRouterMessages(state: ReasoningState): any[] {
   const messages: any[] = [];
 
   for (const msg of state.messages) {
     if (msg.role === 'assistant' && msg.reasoningDetails) {
-      // Include reasoning in assistant message
       messages.push({
         role: 'assistant',
         content: msg.content,
@@ -184,9 +155,6 @@ export function buildOpenRouterMessages(state: ReasoningState): any[] {
   return messages;
 }
 
-/**
- * Get context summary for healthcare
- */
 export function getContextSummary(
   vitals: any,
   medications: any[],

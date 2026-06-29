@@ -1,8 +1,3 @@
-/**
- * PatientRepository — local SQLite + sync queue
- * Uses explicit insertColumns and updateColumns.
- * No Partial<T>, no as unknown as.
- */
 import { BaseRepository, EntityRow } from './BaseRepository';
 import { runQuery, runStatement, sanitizeBindings } from '../lib/database';
 import type {
@@ -12,10 +7,6 @@ import type {
 } from '../types/database';
 import { offlineQueue, SyncPriority } from '../lib/offlineQueue';
 import { createUuid } from '../utils/uuid';
-
-// ─────────────────────────────────────────
-// Explicit DTO contracts (no Partial<T>)
-// ─────────────────────────────────────────
 
 export interface PatientInsert {
   user_id: string;
@@ -63,10 +54,6 @@ export interface PatientUpdate {
   [key: string]: unknown;
 }
 
-// ─────────────────────────────────────────
-// Patient row interface
-// ─────────────────────────────────────────
-
 export interface PatientRow extends EntityRow {
   id: string;
   user_id: string;
@@ -92,10 +79,6 @@ export interface PatientRow extends EntityRow {
   created_at: string;
   updated_at: string | null;
 }
-
-// ─────────────────────────────────────────
-// Emergency Contact DTOs
-// ─────────────────────────────────────────
 
 export interface EmergencyContactInsert {
   patient_id: string;
@@ -131,10 +114,6 @@ export interface EmergencyContactRow extends EntityRow {
   updated_at: string | null;
 }
 
-// ─────────────────────────────────────────
-// Patient Condition DTOs
-// ─────────────────────────────────────────
-
 export interface PatientConditionInsert {
   patient_id: string;
   condition_name: string;
@@ -166,10 +145,6 @@ export interface PatientConditionRow extends EntityRow {
   updated_at: string | null;
 }
 
-// ─────────────────────────────────────────
-// JSONB helpers
-// ─────────────────────────────────────────
-
 function parseJsonb<T>(val: unknown, fallback: T): T {
   if (!val) return fallback;
   if (typeof val === 'string') {
@@ -188,10 +163,6 @@ function serializeJsonb(val: unknown): string | null {
 function getDeviceId(): string {
   return `device_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
-
-// ─────────────────────────────────────────
-// PatientRepository
-// ─────────────────────────────────────────
 
 export class PatientRepository extends BaseRepository<PatientRow, PatientInsert, PatientUpdate> {
   readonly tableName = 'patients';
@@ -257,16 +228,11 @@ export class PatientRepository extends BaseRepository<PatientRow, PatientInsert,
     return rows[0]?.id ?? null;
   }
 
-  /**
-   * Create a new patient with strict PatientInsert DTO.
-   * No Partial<T>, no as unknown as.
-   */
   async createPatient(payload: PatientInsert): Promise<PatientRow> {
     const id = createUuid();
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
 
-    // Build full row with all required fields
     const row: PatientRow = {
       id,
       user_id: payload.user_id,
@@ -298,7 +264,6 @@ export class PatientRepository extends BaseRepository<PatientRow, PatientInsert,
       deleted_by: null,
     };
 
-    // Explicit column list matching insertColumns
     const columns = [
       'id', 'user_id', 'full_name', 'phone', 'birth_date', 'age', 'gender',
       'blood_type', 'condition_type', 'risk_level', 'notes', 'relationship',
@@ -329,7 +294,6 @@ export class PatientRepository extends BaseRepository<PatientRow, PatientInsert,
   }
 
   async updateProfile(id: string, payload: PatientUpdate): Promise<void> {
-    // Use base update with explicit PatientUpdate DTO
     await this.update(id, payload);
   }
 
@@ -351,7 +315,6 @@ export class PatientRepository extends BaseRepository<PatientRow, PatientInsert,
   }
 }
 
-// Separate normalized row type for app usage (parsed JSONB)
 export interface PatientNormalizedRow {
   id: string;
   user_id: string;
@@ -383,10 +346,6 @@ export interface PatientNormalizedRow {
   deleted_by: string | null;
 }
 
-// ─────────────────────────────────────────
-// EmergencyContactRepository
-// ─────────────────────────────────────────
-
 export class EmergencyContactRepository extends BaseRepository<EmergencyContactRow, EmergencyContactInsert, EmergencyContactUpdate> {
   readonly tableName = 'emergency_contacts';
 
@@ -416,7 +375,6 @@ export class EmergencyContactRepository extends BaseRepository<EmergencyContactR
       }
     }
 
-    // Build row directly
     const id = createUuid();
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
@@ -457,10 +415,6 @@ export class EmergencyContactRepository extends BaseRepository<EmergencyContactR
   }
 }
 
-// ─────────────────────────────────────────
-// PatientConditionRepository
-// ─────────────────────────────────────────
-
 export class PatientConditionRepository extends BaseRepository<PatientConditionRow, PatientConditionInsert, PatientConditionUpdate> {
   readonly tableName = 'patient_conditions';
 
@@ -481,7 +435,6 @@ export class PatientConditionRepository extends BaseRepository<PatientConditionR
   }
 
   async syncConditions(patientId: string, conditions: PatientConditionInsert[]): Promise<void> {
-    // Soft delete existing
     const existing = await runQuery<{ id: string }>(
       `SELECT id FROM patient_conditions WHERE patient_id = ? AND is_deleted = 0`,
       [patientId]
@@ -490,17 +443,11 @@ export class PatientConditionRepository extends BaseRepository<PatientConditionR
       await this.delete(row.id);
     }
 
-    // Insert new
     for (const condition of conditions) {
       await this.insert({ ...condition, patient_id: patientId });
     }
   }
 }
-
-// ─────────────────────────────────────────
-// Serialized Write Queue (minimal)
-// Prevents concurrent expo-sqlite write issues
-// ─────────────────────────────────────────
 
 let _writeQueue: Promise<unknown> = Promise.resolve();
 
@@ -508,6 +455,3 @@ export function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
   _writeQueue = _writeQueue.then(fn);
   return _writeQueue as Promise<T>;
 }
-
-// Usage in PatientRepository:
-// await enqueueWrite(() => runStatement(...))

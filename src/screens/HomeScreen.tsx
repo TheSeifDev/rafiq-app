@@ -14,7 +14,9 @@ import { patientService, type PatientProfile } from "../services/patient.service
 import { medicationService, type Medication } from "../services/medication.service";
 import { notificationService } from "../services/notification.service";
 import { formatMedicationTime, parseMedicationTimes } from "../lib/medications/medicationSchedule";
+import { patientContextAggregator, type PatientContext } from "../services/ai/PatientContextAggregator";
 import type { MainTabParamList, MainStackParamList } from "../navigation/types";
+import { aiManager } from "../lib/ai/orchestration";
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, "Home">,
@@ -130,6 +132,7 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
   const [profile, setProfile] = useState<PatientProfile | null>(null);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [patientContext, setPatientContextState] = useState<PatientContext | null>(null);
 
   const loadData = useCallback(async () => {
     const userId = session?.user.id;
@@ -139,6 +142,8 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
     if (!nextProfile) {
       setMedications([]);
       setUnreadCount(0);
+      setPatientContextState(null);
+      aiManager.setPatientContext(null);
       return;
     }
     const [meds, notifications] = await Promise.all([
@@ -147,6 +152,9 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
     ]);
     setMedications(meds.filter((med) => (med.active ?? med.is_active) !== false));
     setUnreadCount(notifications.filter((item) => !item.is_read).length);
+    const pc = await patientContextAggregator.aggregate(nextProfile.id);
+    setPatientContextState(pc);
+    aiManager.setPatientContext(pc);
   }, [session?.user.id]);
 
   useEffect(() => {
@@ -219,7 +227,7 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
 
         <SectionCard title={isAr ? "أدوية اليوم" : "Today's Medications"} colors={colors}>
           {medications.length > 0 ? (
-            medications.slice(0, 4).map((med, index) => (
+            medications.slice(0, 4).map((med) => (
               <MedicationRow key={med.id} med={med} colors={colors} isAr={isAr} />
             ))
           ) : (
@@ -236,8 +244,8 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
         </SectionCard>
 
         <SectionCard title={isAr ? "دليل التغذية" : "Nutrition Guide"} colors={colors}>
-          {nutritionAdvice.map((item) => (
-            <View key={item} style={styles.bulletRow}>
+          {nutritionAdvice.map((item, idx) => (
+            <View key={`nutrition-${idx}`} style={styles.bulletRow}>
               <View style={[styles.dot, { backgroundColor: colors.success }]} />
               <AppText style={[styles.bulletText, { color: colors.textPrimary }]}>{item}</AppText>
             </View>
@@ -245,8 +253,8 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
         </SectionCard>
 
         <SectionCard title={isAr ? "نصائح صحية" : "Health Tips"} colors={colors}>
-          {healthTips.map((item) => (
-            <View key={item} style={styles.bulletRow}>
+          {healthTips.map((item, idx) => (
+            <View key={`tip-${idx}`} style={styles.bulletRow}>
               <View style={[styles.dot, { backgroundColor: colors.warning }]} />
               <AppText style={[styles.bulletText, { color: colors.textPrimary }]}>{item}</AppText>
             </View>

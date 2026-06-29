@@ -1,8 +1,3 @@
-/**
- * AI Provider Types
- * Abstract interface for AI chat providers with fallback support
- */
-
 export interface AIProvider {
   name: string;
   id: string;
@@ -62,7 +57,6 @@ export interface AIResponse {
   finishReason: "stop" | "length" | "content_filter" | "error";
 }
 
-// Error types for AI providers
 export class AIProviderError extends Error {
   constructor(
     message: string,

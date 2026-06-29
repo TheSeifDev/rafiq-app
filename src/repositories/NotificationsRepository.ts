@@ -1,15 +1,6 @@
-/**
- * NotificationsRepository — local SQLite + sync queue
- * Uses explicit insertColumns and updateColumns.
- * No Partial<T>, no as unknown as.
- */
 import { BaseRepository, EntityRow } from './BaseRepository';
 import { runQuery, runStatement, sanitizeBindings } from '../lib/database';
 import { createUuid } from '../utils/uuid';
-
-// ─────────────────────────────────────────
-// Notification DTOs
-// ─────────────────────────────────────────
 
 export type NotificationType = 'critical' | 'reminder' | 'general';
 
@@ -46,10 +37,6 @@ export interface NotificationRow extends EntityRow {
   read_at: string | null;
   updated_at: string | null;
 }
-
-// ─────────────────────────────────────────
-// Alert DTOs
-// ─────────────────────────────────────────
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 
@@ -90,17 +77,9 @@ export interface AlertRow extends EntityRow {
   updated_at: string | null;
 }
 
-// ─────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────
-
 function getDeviceId(): string {
   return `device_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
-
-// ─────────────────────────────────────────
-// NotificationRepository
-// ─────────────────────────────────────────
 
 export class NotificationRepository extends BaseRepository<NotificationRow, NotificationInsert, NotificationUpdate> {
   readonly tableName = 'notifications';
@@ -196,10 +175,6 @@ export class NotificationRepository extends BaseRepository<NotificationRow, Noti
     return row;
   }
 }
-
-// ─────────────────────────────────────────
-// AlertRepository
-// ─────────────────────────────────────────
 
 export class AlertRepository extends BaseRepository<AlertRow, AlertInsert, AlertUpdate> {
   readonly tableName = 'alerts';

@@ -1,38 +1,18 @@
-/**
- * companionMessage.service.ts
- *
- * Generates a dynamic, warm AI companion message for the Home screen.
- *
- * Logic:
- * 1. Reads the last 5 user messages from the chat cache (AsyncStorage).
- * 2. Detects language: Arabic or English.
- * 3. Matches the last message to a topic pool (pain, stomach, mood, general).
- * 4. Returns a short, emotionally-aware follow-up message.
- * 5. Falls back gracefully when no chat history exists.
- *
- * No LLM call — fast, offline-safe, deterministic.
- */
-
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
-// ─── Types ────────────────────────────────────────────────────
 
 export interface CompanionMessage {
   message: string;
   isAr: boolean;
-  icon: string; // Ionicons name
+  icon: string;
   topic: "pain" | "mood" | "general" | "medication" | "followup" | "greeting";
 }
 
-// ─── Chat cache key (must match ChatScreen storage) ──────────
-const CHAT_CACHE_KEY = "rafiq_chat_messages";
+const CHAT_CACHE_KEY = "@rafiq_ai_state";
 
-// ─── Arabic letter detector ──────────────────────────────────
 function containsArabic(text: string): boolean {
-  return /[\u0600-\u06FF]/.test(text);
+  return /[؀-ۿ]/.test(text);
 }
 
-// ─── Topic detection from message text ───────────────────────
 type Topic = CompanionMessage["topic"];
 
 interface TopicRule {
@@ -73,8 +53,6 @@ function detectTopic(text: string): Topic {
   }
   return "general";
 }
-
-// ─── Message pools ────────────────────────────────────────────
 
 type MessagePool = { ar: string[]; en: string[] };
 
@@ -190,10 +168,7 @@ const TOPIC_ICONS: Record<Topic, string> = {
   greeting: "sunny-outline",
 };
 
-// ─── Main export ──────────────────────────────────────────────
-
 export async function getCompanionMessage(): Promise<CompanionMessage> {
-  // Daily seed (changes message once per day)
   const today = new Date();
   const seed = today.getDate() + today.getMonth() * 31;
 
@@ -201,12 +176,12 @@ export async function getCompanionMessage(): Promise<CompanionMessage> {
     const raw = await AsyncStorage.getItem(CHAT_CACHE_KEY);
     if (!raw) return buildFallback(seed);
 
-    const parsed: Array<{ role: string; content: string }> = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) return buildFallback(seed);
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.messages) || parsed.messages.length === 0)
+      return buildFallback(seed);
 
-    // Get last few user messages only
-    const userMessages = parsed
-      .filter((m) => m.role === "user" && typeof m.content === "string")
+    const userMessages = parsed.messages
+      .filter((m: any) => m.role === "user" && typeof m.content === "string")
       .slice(-5);
 
     if (userMessages.length === 0) return buildFallback(seed);
@@ -224,9 +199,8 @@ export async function getCompanionMessage(): Promise<CompanionMessage> {
 }
 
 function buildFallback(seed: number): CompanionMessage {
-  // Use greeting pool with time-of-day bias
   const hour = new Date().getHours();
-  const isAr = true; // Default to Arabic; the HomeScreen overrides based on app language
+  const isAr = true;
   const topic: Topic = "greeting";
   const pool = hour < 12 ? POOLS.greeting.ar : POOLS.general.ar;
   return {
@@ -237,14 +211,12 @@ function buildFallback(seed: number): CompanionMessage {
   };
 }
 
-// Language-aware wrapper (overrides isAr from app language setting)
 export async function getCompanionMessageForLanguage(
   appLanguage: "ar" | "en",
 ): Promise<CompanionMessage> {
   const base = await getCompanionMessage();
   const seed = new Date().getDate() + new Date().getMonth() * 31;
 
-  // If app language differs from chat-detected language, use app language
   if ((appLanguage === "ar") !== base.isAr) {
     const pool = POOLS[base.topic][appLanguage];
     return {

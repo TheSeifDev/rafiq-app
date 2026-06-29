@@ -11,8 +11,8 @@ export type NotificationPrefs = {
   sound: boolean;
   vibration: boolean;
   quietHoursEnabled: boolean;
-  quietHoursStart: string; // "22:00"
-  quietHoursEnd: string;   // "07:00"
+  quietHoursStart: string;
+  quietHoursEnd: string;
 };
 
 const DEFAULT_NOTIF_PREFS: NotificationPrefs = {
@@ -33,7 +33,6 @@ type AppState = {
   darkMode: boolean;
   healthDataConsent: boolean;
   notificationPrefs: NotificationPrefs;
-  /** Used by RecoverySystem to trigger screen re-mounts */
   _recoverReloadTrigger: number;
   hydrate: (fallbackLanguage: AppLanguage) => Promise<void>;
   setLanguage: (language: AppLanguage) => Promise<void>;
@@ -59,7 +58,7 @@ function persist(state: AppState) {
 export const useAppStore = create<AppState>((set, get) => ({
   language: 'ar',
   darkMode: false,
-  healthDataConsent: true,
+  healthDataConsent: false,
   notificationPrefs: { ...DEFAULT_NOTIF_PREFS },
   _recoverReloadTrigger: 0,
   hydrate: async (fallbackLanguage) => {
@@ -70,11 +69,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     try {
       const parsed = JSON.parse(raw);
-      // Merge with defaults so new fields get fallback values on upgrade.
       set({
         language: parsed.language ?? fallbackLanguage,
         darkMode: parsed.darkMode ?? false,
-        healthDataConsent: parsed.healthDataConsent ?? true,
+        healthDataConsent: parsed.healthDataConsent ?? false,
         notificationPrefs: { ...DEFAULT_NOTIF_PREFS, ...(parsed.notificationPrefs ?? {}) },
       });
     } catch {

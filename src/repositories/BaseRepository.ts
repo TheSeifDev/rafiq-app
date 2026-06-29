@@ -1,10 +1,3 @@
-/**
- * BaseRepository — common patterns for all repositories
- * - Write to SQLite local DB via sanitized bindings
- * - Enqueue to offlineQueue for sync
- * - Explicit column lists (no Object.keys dynamic extraction)
- * - Strict DTO contracts (no Partial<T>)
- */
 import { runQuery, runStatement, sanitizeBindings } from '../lib/database';
 import { offlineQueue, SyncPriority } from '../lib/offlineQueue';
 import { createUuid } from '../utils/uuid';
@@ -20,9 +13,6 @@ export interface BaseRecord {
   deleted_by: string | null;
 }
 
-/**
- * Base row interface for all entities
- */
 export interface EntityRow {
   id: string;
   created_at: string;
@@ -34,20 +24,10 @@ export interface EntityRow {
   deleted_by: string | null;
 }
 
-// Simple ID generator — NOT a UUID, only for local non-sync use
 function getDeviceId(): string {
   return `device_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/**
- * Repository base class.
- * Subclasses MUST define:
- *   - tableName
- *   - insertColumns (explicit list for INSERT)
- *   - updateColumns (explicit list for UPDATE SET)
- *
- * Uses sanitized bindings for SQLite safety.
- */
 export abstract class BaseRepository<
   T extends EntityRow,
   TInsert extends { [key: string]: unknown },
@@ -75,10 +55,6 @@ export abstract class BaseRepository<
     return runQuery<T>(sql, params ?? []);
   }
 
-  /**
-   * Insert a new record using explicit column list.
-   * payload MUST be a strict TInsert DTO — no Partial<T> allowed.
-   */
   async insert(
     payload: TInsert,
     options?: { priority?: SyncPriority; userId?: string }
@@ -88,7 +64,6 @@ export abstract class BaseRepository<
     const deviceId = getDeviceId();
     const now = created_at;
 
-    // Build row from explicit insertColumns only
     const row: Record<string, unknown> = {
       id,
       created_at,
@@ -100,7 +75,6 @@ export abstract class BaseRepository<
       deleted_by: null,
     };
 
-    // Add payload columns from TInsert
     for (const col of this.insertColumns) {
       if (col in payload || Object.prototype.hasOwnProperty.call(payload, col)) {
         const val = payload[col];
@@ -114,7 +88,6 @@ export abstract class BaseRepository<
       }
     }
 
-    // Use explicit column list for INSERT
     const columns = this.insertColumns.filter(c => c in row || Object.prototype.hasOwnProperty.call(row, c));
     const allColumns = ['id', 'created_at', 'updated_at', 'version', 'updated_by_device', 'is_deleted', 'deleted_at', 'deleted_by', ...columns];
     const placeholders = allColumns.map(() => '?').join(', ');
@@ -125,7 +98,6 @@ export abstract class BaseRepository<
       values
     );
 
-    // Enqueue to sync with strict payload
     await offlineQueue.enqueue({
       table: this.tableName,
       operation: 'INSERT',
@@ -138,10 +110,6 @@ export abstract class BaseRepository<
     return row as unknown as T;
   }
 
-  /**
-   * Update an existing record using explicit updateColumns.
-   * payload MUST be a strict TUpdate DTO — no Partial<T> allowed.
-   */
   async update(
     id: string,
     payload: TUpdate,
@@ -154,7 +122,6 @@ export abstract class BaseRepository<
     const now = new Date().toISOString();
     const newVersion = (existing.version ?? 0) + 1;
 
-    // Build update from explicit updateColumns only
     const updatePairs: string[] = [];
     const updateValues: (string | number | null)[] = [];
 
@@ -180,7 +147,6 @@ export abstract class BaseRepository<
       updateValues
     );
 
-    // Enqueue to sync
     await offlineQueue.enqueue({
       table: this.tableName,
       operation: 'UPDATE',

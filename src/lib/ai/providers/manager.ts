@@ -1,31 +1,22 @@
-/**
- * AI Provider Manager
- * Uses official OpenRouter SDK with proper fallback
- */
-
 import { AIProvider, AIMessage, HealthContext, StreamingCallback, AIResponse, AIProviderError } from "./types";
 import { openRouterProvider } from "./OpenRouterProvider";
 
 const MAX_RETRIES = 2;
 
-/**
- * Simple Fallback - Only shows outage message, no fake responses
- */
 class MinimalFallbackProvider implements AIProvider {
   name = "Unavailable";
   id = "fallback";
 
   async isAvailable(): Promise<boolean> {
-    return true; // Always available as last resort
+    return true;
   }
 
   async generate(_messages: AIMessage[], _context: HealthContext): Promise<AIMessage> {
-    // No fake responses - just explain the outage
     throw new AIProviderError(
       "AI service temporarily unavailable. Please try again.",
       this.id,
       503,
-      true // Retryable - user might try again and API works
+      true
     );
   }
 
@@ -35,22 +26,17 @@ class MinimalFallbackProvider implements AIProvider {
     onChunk: StreamingCallback,
     _signal?: AbortSignal
   ): Promise<string> {
-    // Single message explaining the outage
     const message = "AI service temporarily unavailable. Please try again.";
     onChunk(message);
     return message;
   }
 }
 
-/**
- * Provider Manager - Single primary provider with minimal fallback
- */
 class ProviderManager {
   private primary: AIProvider;
   private fallback: MinimalFallbackProvider;
 
   constructor() {
-    // Use official SDK provider as primary
     this.primary = openRouterProvider;
     this.fallback = new MinimalFallbackProvider();
   }
@@ -59,9 +45,6 @@ class ProviderManager {
     return this.primary;
   }
 
-  /**
-   * Generate response (non-streaming)
-   */
   async generate(
     messages: AIMessage[],
     context: HealthContext,
@@ -69,7 +52,6 @@ class ProviderManager {
   ): Promise<AIResponse> {
     let lastError: Error | null = null;
 
-    // Try primary provider
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         const isAvailable = await this.primary.isAvailable();
@@ -88,7 +70,6 @@ class ProviderManager {
       } catch (error) {
         lastError = error as Error;
 
-        // Check if retryable
         if (error instanceof AIProviderError && !error.isRetryable) {
           break;
         }
@@ -101,7 +82,6 @@ class ProviderManager {
       }
     }
 
-    // Try minimal fallback
     try {
       const response = await this.fallback.generate(messages, context);
       return {
@@ -111,7 +91,6 @@ class ProviderManager {
         finishReason: "stop",
       };
     } catch {
-      // Fallback also failed, return error message
       return {
         content: "AI service temporarily unavailable. Please try again.",
         provider: this.fallback.name,
@@ -121,9 +100,6 @@ class ProviderManager {
     }
   }
 
-  /**
-   * Generate with streaming
-   */
   async generateStreaming(
     messages: AIMessage[],
     context: HealthContext,
@@ -133,7 +109,6 @@ class ProviderManager {
   ): Promise<AIResponse> {
     let lastError: Error | null = null;
 
-    // Try primary provider with streaming
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         const isAvailable = await this.primary.isAvailable();
@@ -164,7 +139,6 @@ class ProviderManager {
       }
     }
 
-    // Fallback to minimal error message
     try {
       const content = await this.fallback.generateStreaming(messages, context, onChunk, signal);
       return {
@@ -186,6 +160,5 @@ class ProviderManager {
   }
 }
 
-// Export singleton
 export const providerManager = new ProviderManager();
 export default providerManager;

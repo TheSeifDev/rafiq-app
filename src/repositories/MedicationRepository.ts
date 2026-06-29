@@ -1,15 +1,6 @@
-/**
- * MedicationRepository — local SQLite + sync queue
- * Uses explicit insertColumns and updateColumns.
- * No Partial<T>, no as unknown as.
- */
 import { BaseRepository, EntityRow } from './BaseRepository';
 import { runQuery, runStatement, sanitizeBindings } from '../lib/database';
 import { offlineQueue, SyncPriority } from '../lib/offlineQueue';
-
-// ─────────────────────────────────────────
-// Explicit DTO contracts
-// ─────────────────────────────────────────
 
 export interface MedicationInsert {
   patient_id: string;
@@ -64,10 +55,6 @@ export interface MedicationUpdate {
   [key: string]: unknown;
 }
 
-// ─────────────────────────────────────────
-// Medication Row
-// ─────────────────────────────────────────
-
 export interface MedicationRow extends EntityRow {
   id: string;
   patient_id: string;
@@ -97,10 +84,6 @@ export interface MedicationRow extends EntityRow {
   updated_at: string | null;
 }
 
-// ─────────────────────────────────────────
-// MedicationLog DTOs
-// ─────────────────────────────────────────
-
 export interface MedicationLogInsert {
   medication_id: string;
   taken_at: string;
@@ -129,10 +112,6 @@ export interface MedicationLogRow extends EntityRow {
   updated_at: string | null;
 }
 
-// ─────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────
-
 function generateLocalId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -146,10 +125,6 @@ function serializeJsonb(val: unknown): string | null {
   if (typeof val === 'string') return val;
   return JSON.stringify(val);
 }
-
-// ─────────────────────────────────────────
-// MedicationRepository
-// ─────────────────────────────────────────
 
 export class MedicationRepository extends BaseRepository<MedicationRow, MedicationInsert, MedicationUpdate> {
   readonly tableName = 'medications';
@@ -213,10 +188,6 @@ export class MedicationRepository extends BaseRepository<MedicationRow, Medicati
     await this.update(id, payload as MedicationUpdate);
   }
 }
-
-// ─────────────────────────────────────────
-// MedicationLogRepository
-// ─────────────────────────────────────────
 
 export class MedicationLogRepository extends BaseRepository<MedicationLogRow, MedicationLogInsert, MedicationLogUpdate> {
   readonly tableName = 'medication_logs';
