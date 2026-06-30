@@ -227,12 +227,13 @@ export function useAICHat({
         const effectiveUserId = userId || await getUserId();
         let healthContextToUse: HealthContextData | undefined;
         if (effectiveUserId) {
-          const patientContext = await patientContextAggregator.aggregate(effectiveUserId);
-          healthContextToUse = convertPatientContextToHealthContext(patientContext);
-        } else {
-          if (!initializedRef.current) {
-            aiManager.initialize({} as HealthContextData);
-            initializedRef.current = true;
+          try {
+            const patientContext = await patientContextAggregator.aggregate(effectiveUserId);
+            healthContextToUse = convertPatientContextToHealthContext(patientContext);
+          } catch (ctxErr) {
+            // Non-fatal: health context loading failed (UUID mismatch, network, etc.)
+            // The AI chat should still work without patient context
+            console.warn('[AI Chat] Health context aggregation failed (non-fatal):', ctxErr);
           }
         }
 
@@ -244,6 +245,8 @@ export function useAICHat({
             aiManager.updateHealthContext(healthContextToUse);
           }
         }
+        // *** FIX #2b: If health context failed and aiManager still not initialized, ***
+        // *** the generate() method in AIManager now auto-initializes with fallback ***
 
         const response: AIResponse = await aiManager.generate(
           content,

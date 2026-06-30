@@ -154,9 +154,19 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
     ]);
     setMedications(meds.filter((med) => (med.active ?? med.is_active) !== false));
     setUnreadCount(notifications.filter((item) => !item.is_read).length);
-    const pc = await patientContextAggregator.aggregate(nextProfile.id);
-    setPatientContextState(pc);
-    aiManager.setPatientContext(pc);
+
+    // *** FIX #3: Isolate patientContextAggregator failure ***
+    // Previously, if aggregate() threw (e.g. due to data issues), the entire
+    // loadData() would crash and the HomeScreen would show an error.
+    // Now it's isolated so the HomeScreen still shows medications & notifications.
+    try {
+      const pc = await patientContextAggregator.aggregate(nextProfile.id);
+      setPatientContextState(pc);
+      aiManager.setPatientContext(pc);
+    } catch (err) {
+      console.warn('[HomeScreen] Patient context aggregation failed (non-fatal):', err);
+      aiManager.setPatientContext(null);
+    }
   }, [session?.user.id]);
 
   useEffect(() => {

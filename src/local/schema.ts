@@ -1,4 +1,4 @@
-export const RAFIQ_SQLITE_SCHEMA_VERSION = 1;
+export const RAFIQ_SQLITE_SCHEMA_VERSION = 3;
 
 export const RAFIQ_SQLITE_SCHEMA = `
 PRAGMA foreign_keys = ON;

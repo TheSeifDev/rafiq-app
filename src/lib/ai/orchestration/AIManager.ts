@@ -83,10 +83,6 @@ const FALLBACK_HEALTH_CONTEXT: HealthContextData = {
   lastUpdated: new Date().toISOString(),
 };
 
-/**
- * Helper: map AlertInfo-like objects to plain strings for providers
- * that expect recentAlerts: string[].
- */
 function alertsToStrings(alerts: unknown[]): string[] {
   return alerts.map((a: any) => {
     if (typeof a === 'string') return a;
@@ -100,7 +96,7 @@ class AIManager {
   private reasoningState: ReasoningState;
   private healthContext: HealthContextData | null = null;
   private patientContext: PatientContext | null = null;
-  private isInitialized = false;
+  private _isInitialized = false;
   private safetyValidator = new MedicalSafetyValidator();
 
   constructor(config: Partial<AIConfig> = {}) {
@@ -114,7 +110,11 @@ class AIManager {
 
   initialize(healthContext: HealthContextData): void {
     this.healthContext = healthContext;
-    this.isInitialized = true;
+    this._isInitialized = true;
+  }
+
+  isInitialized(): boolean {
+    return this._isInitialized;
   }
 
   updateHealthContext(context: HealthContextData): void {
@@ -141,16 +141,19 @@ class AIManager {
     userMessage: string,
     onChunk?: (chunk: StreamChunk) => void
   ): Promise<AIResponse> {
-    if (!this.isInitialized || !this.healthContext) {
-      throw new Error('[AI Manager] Not initialized. Call initialize() with health context first.');
+    if (!this._isInitialized || !this.healthContext) {
+      console.warn('[AI Manager] Not initialized — using fallback health context');
+      this.initialize(this.healthContext ?? FALLBACK_HEALTH_CONTEXT);
     }
+
+    const healthContext = this.healthContext!;
 
     const topic = extractTopic(userMessage);
     this.reasoningState = pruneForTokenBudget(this.reasoningState);
-    const { insights: healthInsights } = buildHealthContext(this.healthContext);
+    const { insights: healthInsights } = buildHealthContext(healthContext);
     const patientInsights = this.buildPatientInsights(this.patientContext);
     const allInsights = [...healthInsights, ...patientInsights];
-    const systemPrompt = formatContextForPrompt(this.healthContext, allInsights);
+    const systemPrompt = formatContextForPrompt(healthContext, allInsights);
 
     this.reasoningState = addUserMessage(this.reasoningState, userMessage, topic ?? undefined);
     const messages = this.buildMessagesWithContext(systemPrompt);
@@ -279,10 +282,6 @@ class AIManager {
           oxygenSaturation: (latestVitals as Record<string, unknown>).oxygenSaturation as number | undefined,
           temperature: (latestVitals as Record<string, unknown>).temperature as number | undefined,
         },
-        // NOTE: providerManager.generate() accepts HealthContext (providers/types.ts)
-        // which only has: patientName, latestVitals, medications, recentAlerts, lastUpdated.
-        // All other patient data (conditions, allergies, hospital, etc.) is already
-        // embedded in the system prompt via formatContextForPrompt().
         medications: (this.healthContext?.medications ?? []).map(m => ({
           name: typeof m === 'string' ? m : (m as any).name ?? '',
           dosage: typeof m === 'object' && m !== null ? (m as any).dosage : undefined,

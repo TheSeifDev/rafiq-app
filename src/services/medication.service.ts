@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { createUuid } from '../local/db';
 import { deleteLocal, getById, listWhere, upsertLocal, updateLocal } from '../local/repository';
+import { isUuid } from '../utils/uuid';
 
 export type Medication = {
   id: string;
@@ -57,6 +58,7 @@ export type MedicationLogInsert = {
 
 export const medicationService = {
   async getMedications(patientId: string): Promise<Medication[]> {
+    // Always try local first
     const local = await listWhere<Record<string, unknown>>(
       'medications',
       'patient_id = ? AND deleted_at IS NULL',
@@ -64,6 +66,12 @@ export const medicationService = {
       'updated_at DESC, created_at DESC',
     );
     if (local.length > 0) return local as unknown as Medication[];
+
+    // Guard: Supabase columns are UUID type — non-UUID patient IDs will be rejected
+    if (!isUuid(patientId)) {
+      console.warn('[MedicationService] Skipping Supabase fallback: patientId is not a UUID', patientId);
+      return [];
+    }
 
     const { data, error } = await supabase
       .from('medications')
@@ -81,6 +89,11 @@ export const medicationService = {
   async getMedication(id: string): Promise<Medication | null> {
     const local = await getById<Record<string, unknown>>('medications', id);
     if (local && !local.deleted_at) return local as unknown as Medication;
+
+    if (!isUuid(id)) {
+      console.warn('[MedicationService] Skipping Supabase fallback: medication id is not a UUID', id);
+      return null;
+    }
 
     const { data, error } = await supabase.from('medications').select('*').eq('id', id).maybeSingle();
     if (error) throw new Error(error.message);
@@ -139,6 +152,11 @@ export const medicationService = {
     );
     if (local.length > 0) return local as unknown as MedicationLog[];
 
+    if (!isUuid(medicationId)) {
+      console.warn('[MedicationService] Skipping Supabase fallback: medicationId is not a UUID', medicationId);
+      return [];
+    }
+
     const { data, error } = await supabase
       .from('medication_logs')
       .select('*')
@@ -164,6 +182,11 @@ export const medicationService = {
       'taken_at DESC',
     );
     if (local.length > 0) return local as unknown as MedicationLog[];
+
+    if (!isUuid(patientId)) {
+      console.warn('[MedicationService] Skipping Supabase fallback: patientId is not a UUID', patientId);
+      return [];
+    }
 
     const { data, error } = await supabase
       .from('medication_logs')

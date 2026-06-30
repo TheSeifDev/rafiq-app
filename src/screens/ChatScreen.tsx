@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, memo } from "react";
 import {
   View,
   Text,
@@ -99,7 +99,7 @@ function PremiumHeader({ isRTL, theme }: { isRTL: boolean; theme: ChatTheme }) {
   );
 }
 
-function AIBubble({
+const AIBubble = memo(function AIBubble({
   content,
   isStreaming,
   isRTL,
@@ -132,9 +132,9 @@ function AIBubble({
       </View>
     </View>
   );
-}
+});
 
-function UserBubble({ content, isRTL, theme }: { content: string; isRTL: boolean; theme: ChatTheme }) {
+const UserBubble = memo(function UserBubble({ content, isRTL, theme }: { content: string; isRTL: boolean; theme: ChatTheme }) {
   return (
     <View style={[styles.userMessageRow, isRTL && styles.userMessageRowRTL]}>
       <View style={[styles.userBubble, { backgroundColor: theme.userBubble }]}>
@@ -144,9 +144,9 @@ function UserBubble({ content, isRTL, theme }: { content: string; isRTL: boolean
       </View>
     </View>
   );
-}
+});
 
-function ThinkingIndicator({ isRTL, theme }: { isRTL: boolean; theme: ChatTheme }) {
+const ThinkingIndicator = memo(function ThinkingIndicator({ isRTL, theme }: { isRTL: boolean; theme: ChatTheme }) {
   const dot1 = React.useRef(new Animated.Value(0.3)).current;
   const dot2 = React.useRef(new Animated.Value(0.3)).current;
   const dot3 = React.useRef(new Animated.Value(0.3)).current;
@@ -180,7 +180,7 @@ function ThinkingIndicator({ isRTL, theme }: { isRTL: boolean; theme: ChatTheme 
       </View>
     </View>
   );
-}
+});
 
 function PremiumInput({
   onSend,
@@ -321,10 +321,19 @@ export function ChatScreen(): React.JSX.Element {
         const profile = await patientService.getProfile(session.user.id);
         if (!profile || !alive) return;
 
-        const [latestVitals, meds] = await Promise.all([
+        let latestVitals: Awaited<ReturnType<typeof vitalsService.getLatestVitals>> = null;
+        let meds: Awaited<ReturnType<typeof medicationService.getMedications>> = [];
+
+        const results = await Promise.allSettled([
           vitalsService.getLatestVitals(profile.id),
           medicationService.getMedications(profile.id),
         ]);
+
+        if (results[0].status === 'fulfilled') latestVitals = results[0].value;
+        else console.warn('[Chat] Failed to load vitals:', results[0].reason);
+
+        if (results[1].status === 'fulfilled') meds = results[1].value;
+        else console.warn('[Chat] Failed to load medications:', results[1].reason);
 
         const medications = meds
           .filter((m) => (m.active ?? m.is_active) !== false)
@@ -384,7 +393,7 @@ export function ChatScreen(): React.JSX.Element {
           });
         }
       } catch (err) {
-        console.log("[Chat] Failed to load health context:", err);
+        console.warn("[Chat] Failed to load health context (non-fatal):", err);
       }
     }
 
@@ -394,6 +403,9 @@ export function ChatScreen(): React.JSX.Element {
 
   useEffect(() => {
     aiManager.updateHealthContext(healthContext);
+    if (!aiManager.isInitialized()) {
+      aiManager.initialize(healthContext);
+    }
   }, [healthContext]);
 
   const { messages, isLoading, isStreaming, sendMessage } = useAICHat({
@@ -445,9 +457,9 @@ export function ChatScreen(): React.JSX.Element {
           data={messages}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
-          initialNumToRender={12}
-          maxToRenderPerBatch={10}
-          windowSize={7}
+          initialNumToRender={10}
+          maxToRenderPerBatch={8}
+          windowSize={5}
           removeClippedSubviews={Platform.OS === "android"}
           contentContainerStyle={[styles.listContent, { paddingBottom: 16 }]}
           ListEmptyComponent={
