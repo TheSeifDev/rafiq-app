@@ -6,6 +6,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Modal,
+  TextInput,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -15,7 +19,7 @@ import { AppButton } from '../components/ui/AppButton';
 import { AppInput } from '../components/ui/AppInput';
 import { SegmentedToggle } from '../components/ui/SegmentedToggle';
 import { AuthTopControls } from '../components/AuthTopControls';
-import { spacing } from '../theme';
+import { spacing, radius } from '../theme';
 import { useTheme } from '../theme/useTheme';
 import { useAuthStore } from '../store/auth.store';
 import { useAppStore } from '../store/app.store';
@@ -25,7 +29,6 @@ import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
-// ── Supabase error message detection ──
 const EMAIL_NOT_CONFIRMED_PATTERNS = [
   'email not confirmed',
   'email_not_confirmed',
@@ -40,7 +43,6 @@ function isInvalidCredentialsError(message: string): boolean {
   return message.toLowerCase().includes('invalid login credentials');
 }
 
-// ── Inline status banner (replaces ugly Alert) ──
 type BannerType = 'error' | 'info' | 'success';
 
 function StatusBanner({
@@ -55,7 +57,7 @@ function StatusBanner({
   message: string;
   type: BannerType;
   darkMode: boolean;
-  colors: any;
+  colors: ReturnType<typeof useTheme>['colors'];
   onAction?: () => void;
   actionLabel?: string;
   actionLoading?: boolean;
@@ -82,9 +84,12 @@ function StatusBanner({
   };
 
   return (
-    <View style={[bannerStyles.container, { backgroundColor: bgMap[type], borderColor: borderMap[type] }]}>
+    <View style={[bannerStyles.container, { backgroundColor: bgMap[type], borderColor: borderMap[type] }]}
+      accessibilityRole="alert"
+      accessible
+    >
       <View style={bannerStyles.row}>
-        <Ionicons name={iconMap[type] as any} size={20} color={iconColorMap[type]} style={bannerStyles.icon} />
+        <Ionicons name={iconMap[type] as keyof typeof Ionicons.glyphMap} size={20} color={iconColorMap[type]} style={bannerStyles.icon} />
         <AppText style={[bannerStyles.text, { color: colors.textPrimary }]}>
           {message}
         </AppText>
@@ -95,6 +100,8 @@ function StatusBanner({
           disabled={actionLoading}
           activeOpacity={0.7}
           style={[bannerStyles.actionBtn, { borderColor: borderMap[type] }]}
+          accessibilityRole="button"
+          accessibilityLabel={actionLabel}
         >
           <AppText style={[bannerStyles.actionText, { color: iconColorMap[type] }]}>
             {actionLoading ? '...' : actionLabel}
@@ -139,7 +146,213 @@ const bannerStyles = StyleSheet.create({
   },
 });
 
-// ── Main Screen ──
+function ForgotPasswordModal({
+  visible,
+  onClose,
+  isAr,
+  colors,
+  darkMode,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  isAr: boolean;
+  colors: ReturnType<typeof useTheme>['colors'];
+  darkMode: boolean;
+}) {
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const handleReset = useCallback(async () => {
+    const trimmed = email.trim();
+    if (!trimmed) {
+      Alert.alert(
+        isAr ? 'خطأ' : 'Error',
+        isAr ? 'يرجى إدخال البريد الإلكتروني' : 'Please enter your email',
+      );
+      return;
+    }
+    setLoading(true);
+    try {
+      await authService.resetPassword(trimmed);
+      setSent(true);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      Alert.alert(
+        isAr ? 'خطأ' : 'Error',
+        msg,
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [email, isAr]);
+
+  const handleClose = useCallback(() => {
+    setEmail('');
+    setSent(false);
+    setLoading(false);
+    onClose();
+  }, [onClose]);
+
+  const modalBg = darkMode ? 'rgba(0,0,0,0.70)' : 'rgba(0,0,0,0.40)';
+  const cardBg = darkMode ? '#1E293B' : '#FFFFFF';
+  const inputBg = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)';
+  const inputBorder = colors.border;
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={handleClose}
+    >
+      <View style={[fpStyles.overlay, { backgroundColor: modalBg }]}>
+        <View
+          style={[fpStyles.card, { backgroundColor: cardBg, borderColor: colors.border }]}
+          accessible
+          accessibilityLabel={isAr ? 'إعادة تعيين كلمة المرور' : 'Reset password'}
+        >
+          {}
+          <TouchableOpacity
+            onPress={handleClose}
+            style={fpStyles.closeBtn}
+            accessibilityRole="button"
+            accessibilityLabel={isAr ? 'إغلاق' : 'Close'}
+          >
+            <Ionicons name="close" size={22} color={colors.textSecondary} />
+          </TouchableOpacity>
+
+          <Ionicons name="mail-unread-outline" size={48} color={colors.primary} style={fpStyles.icon} />
+
+          <AppText style={[fpStyles.title, { color: colors.textPrimary }]}>
+            {sent
+              ? (isAr ? 'تم الإرسال!' : 'Email Sent!')
+              : (isAr ? 'إعادة تعيين كلمة المرور' : 'Reset Password')
+            }
+          </AppText>
+
+          <AppText style={[fpStyles.subtitle, { color: colors.textSecondary }]}>
+            {sent
+              ? (isAr
+                ? 'إذا كان البريد مسجلاً لدينا، ستصل رسالة ب رابط إعادة التعيين.'
+                : 'If the email is registered, you will receive a reset link.')
+              : (isAr
+                ? 'أدخل بريدك الإلكتروني وسنرسل لك رابط لإعادة تعيين كلمة المرور.'
+                : 'Enter your email and we will send you a password reset link.')
+            }
+          </AppText>
+
+          {!sent && (
+            <>
+              <View style={[fpStyles.inputWrap, { backgroundColor: inputBg, borderColor: inputBorder }]}>
+                <TextInput
+                  style={[fpStyles.input, { color: colors.textPrimary }]}
+                  placeholder="example@email.com"
+                  placeholderTextColor={colors.textSecondary + '80'}
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  textContentType="emailAddress"
+                  returnKeyType="go"
+                  onSubmitEditing={handleReset}
+                  accessibilityLabel={isAr ? 'البريد الإلكتروني' : 'Email address'}
+                  autoFocus
+                />
+              </View>
+
+              <AppButton
+                title={loading
+                  ? (isAr ? 'جاري الإرسال...' : 'Sending...')
+                  : (isAr ? 'إرسال رابط إعادة التعيين' : 'Send Reset Link')
+                }
+                variant="tertiary"
+                onPress={handleReset}
+                loading={loading}
+                disabled={loading || !email.trim()}
+                style={fpStyles.submitBtn}
+              />
+            </>
+          )}
+
+          {sent && (
+            <AppButton
+              title={isAr ? 'العودة لتسجيل الدخول' : 'Back to Login'}
+              variant="outlined"
+              onPress={handleClose}
+              style={fpStyles.backBtn}
+            />
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const fpStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 24,
+    alignItems: 'center',
+    gap: 16,
+    position: 'relative',
+  },
+  closeBtn: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    padding: 4,
+    borderRadius: 20,
+  },
+  icon: {
+    marginTop: 8,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  inputWrap: {
+    width: '100%',
+    height: 52,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+  },
+  input: {
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  submitBtn: {
+    width: '100%',
+    height: 52,
+    borderRadius: 14,
+  },
+  backBtn: {
+    width: '100%',
+    height: 52,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    backgroundColor: 'transparent',
+  },
+});
+
 export function LoginScreen({ navigation }: Props): React.JSX.Element {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -147,6 +360,7 @@ export function LoginScreen({ navigation }: Props): React.JSX.Element {
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [banner, setBanner] = useState<{ message: string; type: BannerType; showResend: boolean } | null>(null);
+  const [showForgotModal, setShowForgotModal] = useState(false);
 
   const { colors, darkMode } = useTheme();
   const language = useAppStore((s) => s.language);
@@ -172,7 +386,6 @@ export function LoginScreen({ navigation }: Props): React.JSX.Element {
     setLoading(true);
     try {
       await signIn(trimmedEmail, password);
-      // Success → RootNavigator auto-switches to MainNavigator
     } catch (error: unknown) {
       const rawMsg = error instanceof Error ? error.message : 'Unknown error';
 
@@ -185,7 +398,6 @@ export function LoginScreen({ navigation }: Props): React.JSX.Element {
           showResend: true,
         });
       } else if (isInvalidCredentialsError(rawMsg)) {
-        // Supabase returns this for both wrong password AND unconfirmed email
         setBanner({
           message: isAr
             ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة.\nإذا سجلت مؤخراً، تأكد من تفعيل بريدك الإلكتروني.'
@@ -243,11 +455,13 @@ export function LoginScreen({ navigation }: Props): React.JSX.Element {
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Header row */}
+          {}
           <View style={styles.headerRow}>
             <TouchableOpacity
               onPress={() => navigation.navigate('Welcome')}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={isAr ? 'رجوع' : 'Go back'}
             >
               <View style={[styles.backCircle, { backgroundColor: backBg, borderColor: backBorder }]}>
                 <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
@@ -256,7 +470,7 @@ export function LoginScreen({ navigation }: Props): React.JSX.Element {
             <AuthTopControls />
           </View>
 
-          {/* Toggle */}
+          {}
           <View style={styles.toggleWrap}>
             <SegmentedToggle
               options={[
@@ -270,7 +484,7 @@ export function LoginScreen({ navigation }: Props): React.JSX.Element {
             />
           </View>
 
-          {/* Status Banner */}
+          {}
           {banner && (
             <StatusBanner
               message={banner.message}
@@ -295,6 +509,7 @@ export function LoginScreen({ navigation }: Props): React.JSX.Element {
               keyboardType="email-address"
               autoCapitalize="none"
               textContentType="emailAddress"
+              accessibilityLabel={t.email}
             />
 
             <AppInput
@@ -306,9 +521,16 @@ export function LoginScreen({ navigation }: Props): React.JSX.Element {
               isPassword
               onToggleSecure={() => setSecure(!secure)}
               textContentType="password"
+              accessibilityLabel={t.password}
             />
 
-            <TouchableOpacity activeOpacity={0.7} style={styles.forgot}>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              style={styles.forgot}
+              onPress={() => setShowForgotModal(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t.forgotPassword}
+            >
               <AppText style={[styles.forgotText, { color: colors.secondary }]}>
                 {t.forgotPassword}
               </AppText>
@@ -328,6 +550,15 @@ export function LoginScreen({ navigation }: Props): React.JSX.Element {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {}
+      <ForgotPasswordModal
+        visible={showForgotModal}
+        onClose={() => setShowForgotModal(false)}
+        isAr={isAr}
+        colors={colors}
+        darkMode={darkMode}
+      />
     </Screen>
   );
 }

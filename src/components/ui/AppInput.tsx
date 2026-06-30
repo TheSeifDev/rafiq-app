@@ -88,6 +88,8 @@ export function AppInput({
             inputStyle,
             (icon && !isPassword) ? { paddingLeft: 8 } : {},
           ]}
+          accessibilityLabel={label ?? placeholder ?? 'Text input'}
+          accessibilityHint={isPassword ? 'Password field' : undefined}
           placeholder={placeholder}
           placeholderTextColor={placeholderColor}
           value={value}

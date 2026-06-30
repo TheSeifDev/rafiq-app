@@ -13,22 +13,17 @@ import { useAuthStore } from './src/store/auth.store';
 import { initNotificationsOnce } from './src/lib/notifications/medicationReminders';
 import { navigationRef } from './src/navigation/MainNavigator';
 import { initializeNotificationChannels } from './src/lib/notifications/notificationPipeline';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { initMonitoring } from './src/lib/monitoring';
 
-// ─── Disable auto-server-registration in Expo Go ────────────
 if (Constants.appOwnership === 'expo') {
   Notifications.setAutoServerRegistrationEnabledAsync(false).catch(() => {});
 }
 
-// Suppress any residual LogBox warnings from the SDK
 LogBox.ignoreLogs([
   'expo-notifications',
   '`expo-notifications` functionality is not fully supported in Expo Go',
 ]);
-
-// ─── Boot component ─────────────────────────────────────────
-// ✅ I18nManager is NOT used here. RTL direction is set ONCE in
-// index.ts at startup and NEVER mutated again during the session.
-// All components derive isRTL from: language === 'ar' (Zustand).
 
 function Boot(): React.JSX.Element {
   const initialize = useAuthStore((state) => state.initialize);
@@ -36,10 +31,10 @@ function Boot(): React.JSX.Element {
   const hydrate = useAppStore((state) => state.hydrate);
 
   useEffect(() => {
+    initMonitoring();
     hydrate(Localization.getLocales()[0]?.languageCode === 'ar' ? 'ar' : 'en').catch(() => undefined);
     initialize().catch(() => undefined);
 
-    // Initialize all notification channels and handlers
     const setupNotifications = async () => {
       await initializeNotificationChannels().catch(console.warn);
       await initNotificationsOnce().catch((e) => console.warn('[Notifications] Init failed:', e));
@@ -47,8 +42,6 @@ function Boot(): React.JSX.Element {
     setupNotifications();
   }, [hydrate, initialize]);
 
-  // ✅ LOCKED direction container — prevents any child from
-  // accidentally flipping the layout. Uses Zustand store, NOT I18nManager.
   const isRTL = language === 'ar';
 
   return (
@@ -61,9 +54,11 @@ function Boot(): React.JSX.Element {
 export default function App(): React.JSX.Element {
   return (
     <SafeAreaProvider>
-      <NavigationContainer ref={navigationRef} linking={linking}>
-        <Boot />
-      </NavigationContainer>
+      <ErrorBoundary>
+        <NavigationContainer ref={navigationRef} linking={linking}>
+          <Boot />
+        </NavigationContainer>
+      </ErrorBoundary>
     </SafeAreaProvider>
   );
 }

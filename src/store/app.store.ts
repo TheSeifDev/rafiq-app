@@ -43,8 +43,8 @@ type AppState = {
 
 const STORAGE_KEY = 'rafiq_app_prefs_v2';
 
-function persist(state: AppState) {
-  return AsyncStorage.setItem(
+function persist(state: AppState): void {
+  AsyncStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
       language: state.language,
@@ -52,7 +52,8 @@ function persist(state: AppState) {
       healthDataConsent: state.healthDataConsent,
       notificationPrefs: state.notificationPrefs,
     }),
-  );
+  ).catch(() => {
+  });
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -72,7 +73,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         language: parsed.language ?? fallbackLanguage,
         darkMode: parsed.darkMode ?? false,
-        healthDataConsent: parsed.healthDataConsent ?? false,
+        healthDataConsent: parsed.healthDataConsent === true ? true : false,
         notificationPrefs: { ...DEFAULT_NOTIF_PREFS, ...(parsed.notificationPrefs ?? {}) },
       });
     } catch {
@@ -81,18 +82,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setLanguage: async (language) => {
     set({ language });
-    await persist(get());
+    persist(get());
   },
   setDarkMode: async (enabled) => {
     set({ darkMode: enabled });
-    await persist(get());
+    persist(get());
   },
   setHealthDataConsent: async (enabled) => {
     set({ healthDataConsent: enabled });
-    await persist(get());
+    persist(get());
   },
   setNotificationPrefs: async (prefs) => {
     set((state) => ({ notificationPrefs: { ...state.notificationPrefs, ...prefs } }));
-    await persist(get());
+    persist(get());
   },
 }));

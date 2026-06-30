@@ -17,6 +17,7 @@ import { formatMedicationTime, parseMedicationTimes } from "../lib/medications/m
 import { patientContextAggregator, type PatientContext } from "../services/ai/PatientContextAggregator";
 import type { MainTabParamList, MainStackParamList } from "../navigation/types";
 import { aiManager } from "../lib/ai/orchestration";
+import { HomeScreenSkeleton } from '../components/ui/SkeletonBox';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, "Home">,
@@ -129,6 +130,7 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
   const isAr = language === "ar";
 
   const [refreshing, setRefreshing] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [profile, setProfile] = useState<PatientProfile | null>(null);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -158,7 +160,9 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
   }, [session?.user.id]);
 
   useEffect(() => {
-    loadData().catch(() => undefined);
+    loadData()
+      .catch(() => undefined)
+      .finally(() => setInitialLoading(false));
   }, [loadData]);
 
   const onRefresh = useCallback(async () => {
@@ -180,6 +184,16 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
       ? "أكمل ملفك الطبي لتصبح توصيات رفيق أدق وأكثر فائدة."
       : "Complete your medical profile so Rafiq can make guidance more personal and useful.";
   }, [medications.length, isAr]);
+
+  if (initialLoading) {
+    return (
+      <Screen>
+        <View style={[styles.scroll, { backgroundColor: colors.background }]}>
+          <HomeScreenSkeleton />
+        </View>
+      </Screen>
+    );
+  }
 
   return (
     <Screen>
@@ -275,10 +289,10 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
                 {isAr ? "ملف الطوارئ" : "Emergency Profile"}
               </AppText>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.navigate("Emergency")} style={[styles.quickButton, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => navigation.navigate("MainTabs", { screen: "Chat" })} style={[styles.quickButton, { borderColor: colors.border }]}>
               <Ionicons name="help-buoy-outline" size={20} color={colors.warning} />
               <AppText style={[styles.quickText, { color: colors.textPrimary }]}>
-                {isAr ? "مساعدة سريعة" : "Quick Help"}
+                {isAr ? "اسأل رفيق" : "Ask Rafiq"}
               </AppText>
             </TouchableOpacity>
           </View>

@@ -31,7 +31,7 @@ function InfoRow({
   icon, iconColor, title, description, rightContent, isLast, darkMode, colors,
 }: {
   icon: string; iconColor: string; title: string; description?: string;
-  rightContent?: React.ReactNode; isLast?: boolean; darkMode: boolean; colors: any;
+  rightContent?: React.ReactNode; isLast?: boolean; darkMode: boolean; colors: ReturnType<typeof import('../theme/useTheme').useTheme>['colors'];
 }) {
   const dividerColor = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
   return (
@@ -54,7 +54,13 @@ function InfoRow({
 export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
   const { colors, darkMode } = useTheme();
   const language = useAppStore((s) => s.language);
-  const t = translations[language] as any;
+  const t = translations[language];
+
+  // Type-safe accessor with fallback
+  const tSafe = (key: string): string => {
+    const val = (t as Record<string, string | undefined>)[key];
+    return val ?? key;
+  };
   const isAr = language === 'ar';
   const session = useAuthStore((s) => s.session);
   const signOut = useAuthStore((s) => s.signOut);
@@ -136,8 +142,8 @@ export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
       if (!result.success) {
         Alert.alert(isAr ? 'خطأ' : 'Error', result.error);
       }
-    } catch (err: any) {
-      Alert.alert(isAr ? 'خطأ' : 'Error', err?.message ?? 'Export failed');
+    } catch (err: unknown) {
+      Alert.alert(isAr ? 'خطأ' : 'Error', err instanceof Error ? err.message : 'Export failed');
     } finally {
       setExporting(false);
     }
@@ -165,8 +171,8 @@ export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
                 isAr ? 'تم الحذف' : 'Account Deleted',
                 isAr ? 'تم حذف جميع بياناتك' : 'All your data has been removed',
               );
-            } catch (err: any) {
-              Alert.alert(isAr ? 'خطأ' : 'Error', err?.message ?? 'Delete failed');
+            } catch (err: unknown) {
+              Alert.alert(isAr ? 'خطأ' : 'Error', err instanceof Error ? err.message : 'Delete failed');
             } finally {
               setDeleting(false);
             }

@@ -8,7 +8,11 @@ export function Screen({ style, ...props }: ViewProps): React.JSX.Element {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar barStyle={darkMode ? 'light-content' : 'dark-content'} />
-      <View {...props} style={[{ flex: 1, backgroundColor: colors.background }, style]} />
+      <View
+        {...props}
+        style={[{ flex: 1, backgroundColor: colors.background }, style]}
+        accessible
+      />
     </SafeAreaView>
   );
 }

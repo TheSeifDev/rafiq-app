@@ -1,6 +1,6 @@
 import React, { Component, ReactNode, ErrorInfo } from 'react';
-import { View, Text, Button, StyleSheet, Alert } from 'react-native';
-import { useTranslation } from 'react-i18next';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { logger } from '../lib/logger';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -26,41 +26,24 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { hasError: true, error };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Error caught by ErrorBoundary:', error, errorInfo);
-
-    if (__DEV__) {
-      Alert.alert(
-        'خطأ في التطبيق',
-        `حدث خطأ غير متوقع: ${error.message}\n\nيرجى الإبلاغ عن هذا الخطأ للمطورين.`,
-        [
-          { text: 'تم', style: 'cancel' },
-          {
-            text: 'إرسال تقرير',
-            onPress: () => {
-              console.log('Error report would be sent here:', {
-                message: error.message,
-                stack: error.stack,
-                info: errorInfo.componentStack
-              });
-            }
-          }
-        ]
-      );
-    }
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    logger.critical('Unhandled component error', {
+      message: error.message,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack,
+    } as unknown as Record<string, unknown>, 'ErrorBoundary');
   }
 
-  public resetError = () => {
+  public resetError = (): void => {
     this.setState({ hasError: false, error: null });
   };
 
-  public render() {
+  public render(): ReactNode {
     const { hasError, error } = this.state;
     const { children, fallback } = this.props;
 
     if (hasError && error) {
-      const FallbackComponent = fallback || ErrorFallback;
-
+      const FallbackComponent = fallback ?? ErrorFallback;
       return (
         <FallbackComponent
           error={error}
@@ -81,58 +64,150 @@ interface ErrorFallbackProps {
 }
 
 const ErrorFallback: React.FC<ErrorFallbackProps> = ({ error, resetError, tryAgain }) => {
-  const { t } = useTranslation();
-
   return (
-    <View style={styles.container}>
-      <Text style={styles.errorTitle}>{t('errorBoundary.title')}</Text>
-      <Text style={styles.errorMessage}>
-        {t('errorMessage')}
-      </Text>
-      <Text style={styles.errorDetails}>
-        {error.message}
-      </Text>
-      <Button
-        title={t('tryAgain')}
-        onPress={tryAgain}
-        color="#0066CC"
-      />
-      <Button
-        title={t('closeApp')}
-        onPress={resetError}
-        color="#CC6666"
-      />
-    </View>
+    <ScrollView
+      contentContainerStyle={styles.scrollContainer}
+      accessibilityRole="alert"
+      accessible
+    >
+      <View style={styles.container}>
+        <View
+          style={styles.iconWrap}
+          accessibilityLabel="Error icon"
+        >
+          <Text style={styles.iconText}>!</Text>
+        </View>
+
+        <Text style={styles.errorTitle} accessibilityRole="header">
+          حدث خطأ غير متوقع
+        </Text>
+
+        <Text style={styles.errorMessage}>
+          نعتذر عن هذا الخطأ. يمكنك المحاولة مرة أخرى أو العودة للشاشة الرئيسية.
+        </Text>
+
+        <View style={styles.detailsCard} accessibilityLabel={`Error: ${error.message}`}>
+          <Text style={styles.detailsLabel} accessibilityRole="header">
+            تفاصيل الخطأ
+          </Text>
+          <Text style={styles.errorDetails} numberOfLines={8}>
+            {error.message}
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          onPress={tryAgain}
+          activeOpacity={0.7}
+          style={styles.tryAgainBtn}
+          accessibilityRole="button"
+          accessibilityLabel="حاول مرة أخرى"
+          accessibilityHint="إعادة تحميل الشاشة الحالية"
+        >
+          <Text style={styles.tryAgainText}>حاول مرة أخرى</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={resetError}
+          activeOpacity={0.7}
+          style={styles.closeBtn}
+          accessibilityRole="button"
+          accessibilityLabel="إغلاق"
+        >
+          <Text style={styles.closeText}>إغلاق</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
+  scrollContainer: {
+    flexGrow: 1,
+  },
   container: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#f8f9fa',
+    padding: 24,
+    backgroundColor: '#0A0F1C',
+    gap: 20,
+  },
+  iconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(255, 59, 59, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 59, 59, 0.30)',
+  },
+  iconText: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#FF3B3B',
   },
   errorTitle: {
     fontSize: 22,
-    fontWeight: 'bold' as const,
-    color: '#d32f2f',
-    marginBottom: 20,
+    fontWeight: '800',
+    color: '#FFFFFF',
     textAlign: 'center',
   },
   errorMessage: {
-    fontSize: 16,
-    color: '#424242',
-    marginBottom: 15,
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.60)',
     textAlign: 'center',
+    lineHeight: 24,
+    maxWidth: 320,
+  },
+  detailsCard: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    padding: 16,
+    gap: 8,
+  },
+  detailsLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.45)',
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.8,
   },
   errorDetails: {
-    fontSize: 14,
-    color: '#757575',
-    marginBottom: 25,
-    textAlign: 'center',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.55)',
     lineHeight: 20,
+  },
+  tryAgainBtn: {
+    width: '100%',
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: '#00C2FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tryAgainText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0A0F1C',
+  },
+  closeBtn: {
+    width: '100%',
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.60)',
   },
 });
 

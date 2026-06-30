@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   StyleSheet,
   Image,
   Pressable,
+  ActivityIndicator,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Screen } from '../components/ui/Screen';
@@ -15,14 +16,31 @@ import { useTheme } from '../theme/useTheme';
 import { useAppStore } from '../store/app.store';
 import { translations } from '../constants/translations';
 import type { AuthStackParamList } from '../navigation/types';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Welcome'>;
 
+const ONBOARDED_KEY = 'rafiq_onboarding_completed';
+
 export function WelcomeScreen({ navigation }: Props): React.JSX.Element {
   const [agreed, setAgreed] = useState(false);
+  const [loadingConsent, setLoadingConsent] = useState(false);
+  const [hasOnboarded, setHasOnboarded] = useState<boolean | null>(null);
   const { colors, darkMode } = useTheme();
   const language = useAppStore((s) => s.language);
   const t = translations[language];
+  const isAr = language === 'ar';
+
+  useEffect(() => {
+    AsyncStorage.getItem(ONBOARDED_KEY).then((val) => {
+      setHasOnboarded(val === 'true');
+      if (val === 'true') {
+        setAgreed(true);
+      }
+    }).catch(() => {
+      setHasOnboarded(false);
+    });
+  }, []);
 
   const mutedText = darkMode ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.40)';
   const subtleText = darkMode ? 'rgba(255,255,255,0.60)' : 'rgba(0,0,0,0.50)';
@@ -31,24 +49,54 @@ export function WelcomeScreen({ navigation }: Props): React.JSX.Element {
   const checkBorder = darkMode ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.25)';
   const outlineBorder = darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)';
 
+  const handleNavigation = useCallback((screen: 'Login' | 'SignUp') => {
+    if (!agreed) return;
+    navigation.navigate(screen);
+  }, [agreed, navigation]);
+
+  const handleConsentAndNavigate = useCallback((screen: 'Login' | 'SignUp') => {
+    if (!agreed) return;
+
+    if (hasOnboarded) {
+      navigation.navigate(screen);
+      return;
+    }
+
+    setLoadingConsent(true);
+    AsyncStorage.setItem(ONBOARDED_KEY, 'true')
+      .then(() => {
+        setHasOnboarded(true);
+        navigation.navigate(screen);
+      })
+      .catch(() => {
+        navigation.navigate(screen);
+      })
+      .finally(() => {
+        setLoadingConsent(false);
+      });
+  }, [agreed, hasOnboarded, navigation]);
+
   return (
     <Screen style={styles.container}>
       <View style={styles.content}>
-        {/* Quick Settings */}
         <AuthTopControls />
 
-        {/* Brand Section */}
         <View style={styles.brandSection}>
           <View style={[styles.logoCard, { backgroundColor: subtleSurface, borderColor: subtleBorder }]}>
             <Image
               source={require('../../assets/logo.png')}
               style={styles.logo}
               resizeMode="contain"
+              accessible
+              accessibilityLabel={t.appName}
             />
           </View>
 
           <View style={styles.textBox}>
-            <AppText style={[styles.brand, { color: colors.textPrimary }]}>
+            <AppText
+              style={[styles.brand, { color: colors.textPrimary }]}
+              accessibilityRole="header"
+            >
               {t.appName}
             </AppText>
             <View style={[styles.accentDivider, { backgroundColor: colors.primary }]} />
@@ -58,27 +106,36 @@ export function WelcomeScreen({ navigation }: Props): React.JSX.Element {
           </View>
         </View>
 
-        {/* Actions */}
         <View style={styles.actions}>
           <AppButton
-            title={t.login}
+            title={loadingConsent
+              ? (isAr ? 'جاري...' : 'Loading...')
+              : t.login
+            }
             variant="tertiary"
-            onPress={() => navigation.navigate('Login')}
+            onPress={() => handleConsentAndNavigate('Login')}
             style={styles.mainBtn}
-            disabled={!agreed}
+            disabled={!agreed || loadingConsent}
           />
           <AppButton
             title={t.signup}
             variant="outlined"
-            onPress={() => navigation.navigate('SignUp')}
+            onPress={() => handleConsentAndNavigate('SignUp')}
             style={[styles.secondBtn, { borderColor: outlineBorder }]}
-            disabled={!agreed}
+            disabled={!agreed || loadingConsent}
           />
 
           <View style={styles.footer}>
             <Pressable
               style={styles.checkboxRow}
               onPress={() => setAgreed(!agreed)}
+              accessibilityRole="checkbox"
+              accessible
+              accessibilityState={{ checked: agreed }}
+              accessibilityLabel={isAr
+                ? `أوافق على ${t.termsOfService} و${t.privacyPolicy}`
+                : `Agree to ${t.termsOfService} and ${t.privacyPolicy}`
+              }
             >
               <View
                 style={[
@@ -94,6 +151,7 @@ export function WelcomeScreen({ navigation }: Props): React.JSX.Element {
                 <AppText
                   style={[styles.checkboxLink, { color: colors.secondary }]}
                   onPress={() => navigation.navigate('TermsOfService')}
+                  accessibilityRole="link"
                 >
                   {t.termsOfService}
                 </AppText>{' '}
@@ -101,6 +159,7 @@ export function WelcomeScreen({ navigation }: Props): React.JSX.Element {
                 <AppText
                   style={[styles.checkboxLink, { color: colors.secondary }]}
                   onPress={() => navigation.navigate('PrivacyPolicy')}
+                  accessibilityRole="link"
                 >
                   {t.privacyPolicy}
                 </AppText>

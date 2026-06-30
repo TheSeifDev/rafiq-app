@@ -55,12 +55,12 @@ const TabButton = memo(function TabButton({
   onPress,
   colors,
 }: {
-  route: any;
+  route: { key: string; name: string };
   isFocused: boolean;
   label: string;
   tab: (typeof TABS)[string];
   onPress: () => void;
-  colors: any;
+  colors: ReturnType<typeof useTheme>['colors'];
 }) {
   const handlePress = useCallback(() => {
     if (!isFocused) {
@@ -76,6 +76,9 @@ const TabButton = memo(function TabButton({
       onPress={handlePress}
       style={styles.tabButton}
       android_ripple={{ color: colors.primarySoft, borderless: true }}
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: isFocused }}
     >
       {/* Icon */}
       <View style={styles.iconContainer}>
@@ -147,7 +150,7 @@ export function BottomTabBar({
             const tab = TABS[route.name];
             if (!tab) return null;
 
-            const label = (t as any)[tab.labelKey] ?? route.name;
+            const label = (t as Record<string, string>)[tab.labelKey] ?? route.name;
 
             return (
               <TabButton

@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import { RAFIQ_SQLITE_SCHEMA } from './schema';
+import { RAFIQ_SQLITE_SCHEMA, RAFIQ_SQLITE_SCHEMA_VERSION } from './schema';
 import { createUuid as createRuntimeUuid } from '../utils/uuid';
 
 const DB_NAME = 'rafiq-local.db';
@@ -12,10 +12,47 @@ export function createUuid(): string {
   return createRuntimeUuid();
 }
 
+const MIGRATIONS: Record<number, string> = {
+};
+
+async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
+  const rows = await db.getAllAsync<{ version: number }>(
+    'SELECT MAX(version) as version FROM schema_migrations'
+  );
+  const currentVersion = rows[0]?.version ?? 0;
+
+  if (currentVersion < RAFIQ_SQLITE_SCHEMA_VERSION) {
+    console.info(`[SQLite] Migrating from version ${currentVersion} to ${RAFIQ_SQLITE_SCHEMA_VERSION}`);
+
+    for (let v = currentVersion + 1; v <= RAFIQ_SQLITE_SCHEMA_VERSION; v++) {
+      if (v === 1) continue;
+
+      const migrationSql = MIGRATIONS[v];
+      if (migrationSql) {
+        try {
+          await db.execAsync(migrationSql);
+          console.info(`[SQLite] Applied migration v${v}`);
+        } catch (err) {
+          console.error(`[SQLite] Migration v${v} failed:`, err);
+        }
+      }
+
+      try {
+        await db.runAsync(
+          'INSERT OR REPLACE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, datetime(\'now\'))',
+          [v, `migration-v${v}`]
+        );
+      } catch {
+      }
+    }
+  }
+}
+
 export async function getLocalDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = SQLite.openDatabaseAsync(DB_NAME).then(async (db) => {
       await db.execAsync(RAFIQ_SQLITE_SCHEMA);
+      await runMigrations(db);
       return db;
     });
   }

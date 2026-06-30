@@ -217,7 +217,7 @@ export function recordFrame(frameTimeMs: number): void {
     dropCount = 0;
     frameCount = 0;
     totalFrameTime = 0;
-    persistMetrics().catch(() => {});
+    persistMetrics().catch(() => { });
 
     eventBus.emit({
       type: 'monitoring.frames',
@@ -241,7 +241,7 @@ export function recordSyncLatency(table: string, latencyMs: number, success: boo
   syncHistory.push({ latencyMs, timestamp: Date.now(), table, success });
   if (syncHistory.length > MAX_SYNC_ENTRIES) syncHistory.shift();
 
-  persistMetrics().catch(() => {});
+  persistMetrics().catch(() => { });
 
   if (!success || latencyMs > 5000) {
     eventBus.emit({
@@ -299,7 +299,7 @@ export function recordBLEEvent(event: BLEMetric['event'], deviceId?: string): vo
   if (event === 'disconnect') metrics.bleDisconnectCount++;
   if (event === 'reconnect') metrics.bleReconnectCount++;
 
-  persistMetrics().catch(() => {});
+  persistMetrics().catch(() => { });
 
   if (event === 'disconnect') {
     const recentDisconnects = bleHistory.filter(
@@ -329,7 +329,7 @@ export function recordBLEEvent(event: BLEMetric['event'], deviceId?: string): vo
 export function updateRealtimeHealth(health: AppMetrics['realtimeHealth']): void {
   const prev = metrics.realtimeHealth;
   metrics.realtimeHealth = health;
-  persistMetrics().catch(() => {});
+  persistMetrics().catch(() => { });
 
   if (health !== prev) {
     eventBus.emit({
@@ -346,16 +346,21 @@ export function updateRealtimeHealth(health: AppMetrics['realtimeHealth']): void
 
 function setupEventListeners(): void {
   eventBus.on('wearable.disconnected', () => recordBLEEvent('disconnect'));
-  eventBus.on('wearable.connected', (evt) => recordBLEEvent('connect', (evt.payload as any)?.deviceId));
+  eventBus.on('wearable.connected', (evt) => {
+    const deviceId = typeof evt.payload === 'object' && evt.payload !== null
+      ? (evt.payload as { deviceId?: string }).deviceId
+      : undefined;
+    recordBLEEvent('connect', deviceId);
+  });
   eventBus.on('supabase.connectionStateChanged', (evt) => {
-    const payload = evt.payload as any;
+    const payload = evt.payload as { current?: string; previous?: string } | undefined;
     const health = payload?.current === 'active'
       ? 'healthy'
       : payload?.current === 'reconnecting' ? 'degraded' : 'down';
     updateRealtimeHealth(health);
   });
   eventBus.on('app.bootstrapComplete', (evt) => {
-    const phases = (evt.payload as any)?.phases ?? {};
+    const phases = (evt.payload as { phases?: Record<string, { durationMs?: number }> } | undefined)?.phases ?? {};
     const phaseDurations: Record<string, number> = {};
     for (const [key, val] of Object.entries(phases)) {
       if (typeof val === 'object' && val !== null && 'durationMs' in (val as object)) {
@@ -404,7 +409,7 @@ export function getMetricsSummary(): string {
   ].join(' | ');
 }
 
-// ─── Init ────────────────────────────────────────────────────────────────────
+// ─── Init ────────────────────────────────────────────────────────────
 
 let initialized = false;
 
@@ -414,6 +419,30 @@ export function initMonitoring(): void {
 
   markStartupBegin();
   setupEventListeners();
+
+  // ── Crash Report Recovery ──
+  // On startup, check if the previous session crashed.
+  // If so, log it and clear the crash report.
+  const CRASH_LOG_KEY = 'rafiq_crash_report';
+  (async () => {
+    try {
+      const raw = await AsyncStorage.getItem(CRASH_LOG_KEY);
+      if (raw) {
+        const report = JSON.parse(raw);
+        eventBus.emit({
+          type: 'monitoring.previousCrash',
+          source: 'system',
+          timestamp: Date.now(),
+          payload: { ...report },
+          metadata: { severity: 'high', category: 'stability' },
+        });
+        // Clear the crash report after reading it
+        await AsyncStorage.removeItem(CRASH_LOG_KEY);
+      }
+    } catch {
+      // Ignore — crash recovery is best-effort
+    }
+  })();
 
   setInterval(() => { updateQueueMetrics(); }, 30_000);
 
