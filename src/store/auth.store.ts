@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Session } from '@supabase/supabase-js';
 import { authService } from '../services/auth.service';
 import { patientService } from '../services/patient.service';
+import { syncService } from '../services/sync.service';
 
 export type AuthState = {
   session: Session | null;
@@ -21,7 +22,7 @@ async function ensurePatientRow(session: Session): Promise<void> {
   const user = session.user;
   if (!user) return;
 
-  try {
+  const createRow = async () => {
     if (await patientService.hasPatient(user.id)) return;
 
     // Extract metadata stored during signup
@@ -37,10 +38,21 @@ async function ensurePatientRow(session: Session): Promise<void> {
       phone: meta.phone ?? null,
       birth_date: meta.birth_date ?? null,
     });
-  } catch {
-    // Non-fatal: patient row creation failure shouldn't block login
-    // It will be retried on next session restoration
-    console.warn('[auth] ensurePatientRow failed, will retry on next session');
+  };
+
+  try {
+    await createRow();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[auth] ensurePatientRow first attempt failed:', msg, '— retrying once...');
+    // Retry once after a short delay (handles transient network issues)
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      await createRow();
+    } catch (retryErr) {
+      const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+      console.warn('[auth] ensurePatientRow retry also failed:', retryMsg, '— will retry on next session');
+    }
   }
 }
 
@@ -55,6 +67,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     if (session) {
       ensurePatientRow(session);
+      syncService.start(session.user.id);
     }
 
     // 2. Listen for future auth state changes (login/logout/token refresh)
@@ -63,6 +76,9 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       if (newSession) {
         ensurePatientRow(newSession);
+        syncService.start(newSession.user.id);
+      } else {
+        syncService.stop();
       }
     });
   },
@@ -72,6 +88,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ session });
     // Create patient row if it doesn't exist yet
     ensurePatientRow(session);
+    syncService.start(session.user.id);
   },
 
   signUp: async (email, password) => {
@@ -79,6 +96,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signOut: async () => {
+    syncService.stop();
     await authService.signOut();
     set({ session: null });
   },

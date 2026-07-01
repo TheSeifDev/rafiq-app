@@ -14,16 +14,7 @@ import type { NotificationPrefs } from '../../store/app.store';
 // ─── Environment detection ──────────────────────────────────
 export const IS_EXPO_GO = Constants.appOwnership === 'expo';
 
-// ─── Global handler (module-level — runs before any scheduling) ──
-
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+// NOTE: setNotificationHandler is set in notificationPipeline.ts to avoid duplicate registration.
 
 // ─── Permission (local only — no token) ─────────────────────
 
@@ -127,6 +118,7 @@ export async function scheduleMedicationReminder(params: {
         notificationKey: identifier,
       },
       sound: 'default',
+      categoryIdentifier: 'MEDICATION_REMINDER',
       ...(Platform.OS === 'android' && { channelId: 'medications' }),
     },
     trigger: IS_EXPO_GO

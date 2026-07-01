@@ -98,7 +98,9 @@ export class PatientContextAggregator {
   async aggregate(userId: string): Promise<PatientContext> {
     const patient = await patientService.getProfile(userId);
     if (!patient) {
-      throw new Error('Patient profile not found');
+      console.warn('[PatientContextAggregator] Patient profile not found for userId:', userId, '— returning minimal context');
+      // Return minimal context instead of throwing — AI can still work without full patient data
+      return this.buildMinimalContext();
     }
 
     const emergencyContacts = await patientService.getEmergencyContacts(patient.id);
@@ -286,6 +288,29 @@ export class PatientContextAggregator {
       console.warn('Failed to get recent AI context:', error);
       return { symptoms: [], concerns: [], followUpTopics: [], lastConversation: null };
     }
+  }
+
+  private buildMinimalContext(): PatientContext {
+    return {
+      fullName: 'User',
+      age: null,
+      gender: null,
+      bloodType: null,
+      phone: null,
+      birthDate: null,
+      relationship: null,
+      address: { city: null, area: null, detailed: null, geocoded: null },
+      emergency: { contacts: [], primaryContact: null, profile: null },
+      reporter: { relation: null, data: { name: null, phone: null, isPrimaryContact: null } },
+      hospital: { name: null, doctorName: null, data: { address: null, phone: null, hasMedicalFile: null, fileNumber: null } },
+      medications: { active: [], schedules: {}, adherence: {} },
+      conditions: { list: [], riskLevel: null },
+      allergies: { list: [], history: [] },
+      nutrition: { mealsToday: 0, caloriesToday: 0, waterIntake: 0, dietNotes: null },
+      alerts: { emergency: [], gas: [], oxygen: [], heart: [], other: [] },
+      recentAIContext: { symptoms: [], concerns: [], followUpTopics: [], lastConversation: null },
+      profileCompletion: { percentage: 0, completedFields: [], missingFields: [], readinessScore: 0 },
+    };
   }
 }
 

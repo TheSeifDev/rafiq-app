@@ -199,4 +199,36 @@ export const medicationService = {
     if (error) throw new Error(error.message);
     return (data ?? []) as unknown as MedicationLog[];
   },
+
+  /**
+   * Mark a dose as taken (called from notification action button TAKEN).
+   * Logs the dose and decrements remaining_quantity if stock tracking is active.
+   */
+  async markDoseTaken(medicationId: string): Promise<void> {
+    const now = new Date().toISOString();
+
+    // Log the dose taken
+    await upsertLocal('medication_logs', {
+      id: createUuid(),
+      medication_id: medicationId,
+      taken_at: now,
+      scheduled_for: now,
+      skipped: false,
+      note: 'أُخذ من الإشعار',
+      created_at: now,
+    }, { priority: 'normal' });
+
+    // Decrement remaining quantity if stock tracking is active
+    try {
+      const med = await this.getMedication(medicationId);
+      if (med && typeof med.remaining_quantity === 'number' && med.remaining_quantity > 0) {
+        await updateLocal('medications', medicationId, {
+          remaining_quantity: med.remaining_quantity - 1,
+          updated_at: now,
+        }, { priority: 'normal' });
+      }
+    } catch (err) {
+      console.warn('[MedicationService] markDoseTaken: stock decrement failed', err);
+    }
+  },
 };

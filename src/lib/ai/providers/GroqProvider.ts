@@ -2,16 +2,21 @@ import { AIProvider, AIMessage, HealthContext, StreamingCallback, AIProviderErro
 import { fetchWithRetry, type StreamConfig } from '../streaming';
 import { env } from '../../../config/env';
 
-// Free-tier model that actually exists on OpenRouter.
-// Override via EXPO_PUBLIC_OPENROUTER_MODEL env variable.
-const DEFAULT_MODEL = 'meta-llama/llama-3.1-8b-instruct:free';
-const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+/**
+ * Groq Provider — uses Groq's OpenAI-compatible API as a fast, free-tier fallback.
+ * Groq has higher rate limits than OpenRouter free tier.
+ * Default model: llama-3.1-8b-instant (fast, good for health chat)
+ * Override: EXPO_PUBLIC_GROQ_MODEL env variable
+ */
+
+const DEFAULT_MODEL = 'llama-3.1-8b-instant';
+const API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 const FETCH_CONFIG: StreamConfig = {
   throttleMs: 16,
   bufferSize: 5,
-  timeoutMs: 60000,
-  maxRetries: 1, // Only retry once — 429s are handled separately
+  timeoutMs: 30000,
+  maxRetries: 1, // Groq is fast — only 1 retry
   retryDelayMs: 1000,
 };
 
@@ -19,11 +24,12 @@ interface ProviderHealth {
   isHealthy: boolean;
   lastError: string | null;
   consecutiveFailures: number;
+  rateLimitedUntil: number; // timestamp ms
 }
 
-class OpenRouterProvider implements AIProvider {
-  name = 'OpenRouter';
-  id = 'openrouter';
+class GroqProvider implements AIProvider {
+  name = 'Groq';
+  id = 'groq';
 
   private apiKey: string;
   private model: string;
@@ -31,38 +37,30 @@ class OpenRouterProvider implements AIProvider {
     isHealthy: true,
     lastError: null,
     consecutiveFailures: 0,
+    rateLimitedUntil: 0,
   };
-  private apiKeyValidated = false;
 
-  constructor(apiKey?: string, model?: string) {
-    const rawKey = apiKey || env.openRouterApiKey || '';
-    this.apiKey = rawKey;
+  constructor(apiKey?: string, model: string = DEFAULT_MODEL) {
+    const rawKey = apiKey || env.groqApiKey || '';
+    this.apiKey = rawKey.trim().replace(/^[\"']|[\"']$/g, '');
+    this.model = model;
 
     if (this.apiKey) {
-      const isValid = this.apiKey.startsWith('sk-or-v1-');
-      console.log(
-        '[OpenRouter] API key loaded:',
-        isValid ? 'valid format' : 'invalid format'
-      );
-      this.apiKeyValidated = isValid;
+      const isValid = this.apiKey.startsWith('gsk_');
+      console.log('[Groq] API key loaded:', isValid ? 'valid format' : 'invalid format');
     } else {
-      console.warn('[OpenRouter] No API key found in environment');
+      console.warn('[Groq] No API key found in environment (EXPO_PUBLIC_GROQ_KEY)');
     }
-
-    // Use env override if available, then constructor arg, then default
-    this.model = env.openRouterModel || model || DEFAULT_MODEL;
   }
 
   async isAvailable(): Promise<boolean> {
-    if (!this.apiKey || !this.apiKeyValidated) {
-      const envKey = env.openRouterApiKey;
-      if (envKey && envKey.startsWith('sk-or-v1-')) {
-        this.resetHealth();
-        this.apiKey = envKey;
-        this.apiKeyValidated = true;
-      } else {
-        return false;
-      }
+    if (!this.apiKey || !this.apiKey.startsWith('gsk_')) {
+      return false;
+    }
+    // If currently rate-limited, check if the window has passed
+    if (this.health.rateLimitedUntil > Date.now()) {
+      console.warn('[Groq] Rate limit window active, unavailable until', new Date(this.health.rateLimitedUntil).toISOString());
+      return false;
     }
     return this.health.isHealthy;
   }
@@ -78,7 +76,7 @@ class OpenRouterProvider implements AIProvider {
       raw = await response.text();
     } catch (err) {
       throw new AIProviderError(
-        `Failed to read response text: ${(err as Error).message}`,
+        `[Groq] Failed to read response: ${(err as Error).message}`,
         this.id,
         500,
         true
@@ -90,7 +88,7 @@ class OpenRouterProvider implements AIProvider {
       data = JSON.parse(raw);
     } catch (err) {
       throw new AIProviderError(
-        `Failed to parse JSON: ${(err as Error).message} — raw: ${raw.slice(0, 200)}`,
+        `[Groq] Failed to parse JSON: ${(err as Error).message} — raw: ${raw.slice(0, 200)}`,
         this.id,
         500,
         false
@@ -108,18 +106,10 @@ class OpenRouterProvider implements AIProvider {
     onChunk: StreamingCallback,
     _signal?: AbortSignal
   ): Promise<string> {
-    console.warn(
-      '[OpenRouter] generateStreaming() is not supported on Expo SDK 54 React Native. ' +
-      'Falling back to non-streaming generate().'
-    );
-
+    // No streaming on React Native — fall back to regular generate()
     const result = await this.generate(messages, context);
     if (result.content) {
-      try {
-        onChunk(result.content);
-      } catch (err) {
-        console.warn('[OpenRouter] onChunk callback threw:', (err as Error).message);
-      }
+      try { onChunk(result.content); } catch { /* ignore callback errors */ }
     }
     return result.content;
   }
@@ -128,11 +118,8 @@ class OpenRouterProvider implements AIProvider {
     messages: AIMessage[],
     context: HealthContext
   ): Promise<Response> {
-    if (!this.apiKey) {
-      throw new AIProviderError('OpenRouter API key not configured', this.id, 401, false);
-    }
-    if (!this.apiKey.startsWith('sk-or-v1-')) {
-      throw new AIProviderError('Invalid OpenRouter API key format', this.id, 401, false);
+    if (!this.apiKey || !this.apiKey.startsWith('gsk_')) {
+      throw new AIProviderError('Groq API key not configured or invalid', this.id, 401, false);
     }
 
     const systemPrompt = this.createSystemPrompt(context);
@@ -152,13 +139,11 @@ class OpenRouterProvider implements AIProvider {
           headers: {
             Authorization: `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://rafiq-health.app',
-            'X-Title': 'RAFIQ Health Assistant',
           },
           body: JSON.stringify({
             model: this.model,
             messages: allMessages,
-            max_tokens: 2000,
+            max_tokens: 1500,
             temperature: 0.7,
             stream: false,
           }),
@@ -169,23 +154,21 @@ class OpenRouterProvider implements AIProvider {
 
       if (!response.ok) {
         let errorBody = '';
-        try {
-          errorBody = await response.text();
-        } catch {
-          errorBody = '(unreadable)';
-        }
+        try { errorBody = await response.text(); } catch { errorBody = '(unreadable)'; }
+
         if (response.status === 429) {
-          // Throw AIRateLimitError so the provider manager immediately fails over to Groq
+          // Mark rate limited for 60 seconds
+          this.health.rateLimitedUntil = Date.now() + 60_000;
           this.markFailure(`Rate limited (429)`);
           throw new AIRateLimitError(this.id);
         }
-        const isRetryable = response.status >= 500;
+
         this.markFailure(`HTTP ${response.status}: ${errorBody.slice(0, 200)}`);
         throw new AIProviderError(
-          `OpenRouter error ${response.status}: ${errorBody.slice(0, 200)}`,
+          `Groq error ${response.status}: ${errorBody.slice(0, 200)}`,
           this.id,
           response.status,
-          isRetryable
+          response.status >= 500
         );
       }
 
@@ -194,7 +177,7 @@ class OpenRouterProvider implements AIProvider {
       if (error instanceof AIProviderError) throw error;
       this.markFailure((error as Error).message);
       throw new AIProviderError(
-        (error as Error).message || 'Request failed',
+        (error as Error).message || 'Groq request failed',
         this.id,
         500,
         true
@@ -205,17 +188,13 @@ class OpenRouterProvider implements AIProvider {
   private createSystemPrompt(context: HealthContext): string {
     const vitals = context.latestVitals;
     const medList = context.medications
-      .map(m => `- ${m.name}${m.dosage ? ` (${m.dosage})` : ''}${m.time ? ` at ${m.time}` : ''}`)
+      .map(m => `- ${m.name}${m.dosage ? ` (${m.dosage})` : ''}`)
       .join('\n');
 
-    const alertsText =
-      context.recentAlerts.length > 0
-        ? context.recentAlerts.map(a => `- ${a}`).join('\n')
-        : '- No recent alerts';
-
     return `You are RAFIQ, a compassionate healthcare AI assistant for a medical monitoring app.
+You MUST respond in the SAME LANGUAGE the user writes in (Arabic if they write Arabic, English if they write English).
 
-CONTEXT:
+PATIENT CONTEXT:
 - Patient: ${context.patientName || 'User'}
 - Last Updated: ${context.lastUpdated}
 
@@ -225,28 +204,21 @@ ${vitals.bloodPressureSys && vitals.bloodPressureDia ? `💗 Blood Pressure: ${v
 ${vitals.oxygenSaturation ? `🫁 SpO2: ${vitals.oxygenSaturation}%` : '🫁 No SpO2 data'}
 ${vitals.temperature ? `🌡️ Temperature: ${vitals.temperature}°C` : '🌡️ No temperature data'}
 
-CURRENT MEDICATIONS:
-${medList || '- No medications recorded'}
-
-RECENT ALERTS:
-${alertsText}
+MEDICATIONS:
+${medList || '- None recorded'}
 
 GUIDELINES:
-1. Be empathetic, clear, and concise
-2. Use medical terms accurately but explain them simply
-3. Focus on actionable health advice
-4. Never provide definitive diagnoses - always suggest consulting a doctor
-5. For emergencies, direct users to emergency services immediately
-6. Keep responses short and practical (2-4 sentences for quick answers)
-7. Use markdown for formatting when helpful
-
-Remember: You are a health assistant, not a doctor. Always encourage professional medical advice for serious concerns.`;
+1. Be empathetic and concise
+2. Never provide definitive diagnoses — always recommend consulting a doctor
+3. For emergencies, direct to emergency services immediately
+4. Keep responses focused (2-4 sentences for quick questions)`;
   }
 
   private markSuccess(): void {
     this.health.consecutiveFailures = 0;
     this.health.isHealthy = true;
     this.health.lastError = null;
+    this.health.rateLimitedUntil = 0;
   }
 
   private markFailure(error: string): void {
@@ -257,19 +229,16 @@ Remember: You are a health assistant, not a doctor. Always encourage professiona
     }
   }
 
-  getHealth(): ProviderHealth {
-    return { ...this.health };
-  }
-
   resetHealth(): void {
     this.health = {
       isHealthy: true,
       lastError: null,
       consecutiveFailures: 0,
+      rateLimitedUntil: 0,
     };
   }
 }
 
-export const openRouterProvider = new OpenRouterProvider();
-export { OpenRouterProvider };
-export default openRouterProvider;
+export const groqProvider = new GroqProvider();
+export { GroqProvider };
+export default groqProvider;

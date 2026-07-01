@@ -31,6 +31,8 @@ export const env = {
   supabaseAnonKey: getVar("EXPO_PUBLIC_SUPABASE_ANON_KEY", true),
   openRouterApiKey: getAPIKey("EXPO_PUBLIC_OPENROUTER_API_KEY"),
   groqApiKey: getAPIKey("EXPO_PUBLIC_GROQ_KEY"),
+  groqModel: getVar("EXPO_PUBLIC_GROQ_MODEL") ?? "llama-3.1-8b-instant",
+  openRouterModel: getVar("EXPO_PUBLIC_OPENROUTER_MODEL") ?? "openai/gpt-4o-mini",
   enableDebugLogs: getVar("EXPO_PUBLIC_DEBUG") === "true",
 };
 

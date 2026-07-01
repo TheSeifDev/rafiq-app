@@ -15,6 +15,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Linking,
   ScrollView,
   View,
@@ -139,20 +140,63 @@ const T = {
 
 type Lang = "ar" | "en";
 
-// ─── Quick Call Data ──────────────────────────────────────────
+// ─── Egyptian Emergency Numbers ─────────────────────────────
 
-interface QuickCall {
+interface EmergencyNumber {
   number: string;
-  labelKey: keyof (typeof T)["en"];
+  name: string;
+  category: 'general' | 'medical' | 'helpline' | 'utility';
   icon: string;
   color: string;
 }
 
-const QUICK_CALLS: QuickCall[] = [
-  { number: "997", labelKey: "ambulance", icon: "medkit", color: "#FF3B3B" },
-  { number: "998", labelKey: "police", icon: "shield-checkmark", color: "#F59E0B" },
-  { number: "999", labelKey: "fire", icon: "flame", color: "#FF6B6B" },
-  { number: "920033333", labelKey: "health", icon: "call", color: "#00C2FF" },
+const EGYPTIAN_EMERGENCY_NUMBERS: EmergencyNumber[] = [
+  // الطوارئ العامة
+  { number: '112', name: 'الطوارئ العامة', category: 'general', icon: 'alert-circle', color: '#ef4444' },
+  { number: '123', name: 'الشرطة', category: 'general', icon: 'shield-checkmark', color: '#eab308' },
+  // الخدمات الطبية
+  { number: '125', name: 'الإسعاف', category: 'medical', icon: 'medkit', color: '#ef4444' },
+  { number: '126', name: 'المطافئ', category: 'medical', icon: 'flame', color: '#f97316' },
+  { number: '153', name: 'المرور', category: 'medical', icon: 'car', color: '#3b82f6' },
+  { number: '920033333', name: 'الخط الصحي', category: 'medical', icon: 'call', color: '#06b6d4' },
+  { number: '37717173', name: 'مركز السموم', category: 'medical', icon: 'flask', color: '#dc2626' },
+  { number: '23624543', name: 'إسعاف القاهرة', category: 'medical', icon: 'medkit', color: '#ef4444' },
+  { number: '27928585', name: 'إسعاف الجيزة', category: 'medical', icon: 'medkit', color: '#ef4444' },
+  { number: '25240054', name: 'إسعاف حلوان', category: 'medical', icon: 'medkit', color: '#ef4444' },
+  // خطوط المساعدة
+  { number: '16000', name: 'المجلس الطبي', category: 'helpline', icon: 'people', color: '#8b5cf6' },
+  { number: '15555', name: 'صيدلية', category: 'helpline', icon: 'medical', color: '#10b981' },
+  { number: '15000', name: 'مكافحة الإدمان', category: 'helpline', icon: 'heart', color: '#6366f1' },
+  { number: '109', name: 'نجدة الطفولة', category: 'helpline', icon: 'happy', color: '#f472b6' },
+  { number: '15200', name: 'نجدة المرأة', category: 'helpline', icon: 'person', color: '#ec4899' },
+  { number: '28007777', name: 'التأمين الصحي', category: 'helpline', icon: 'shield', color: '#14b8a6' },
+  // المرافق
+  { number: '121', name: 'الغاز', category: 'utility', icon: 'flame', color: '#f97316' },
+  { number: '128', name: 'مياه الشرب', category: 'utility', icon: 'water', color: '#0ea5e9' },
+  { number: '122', name: 'الكهرباء', category: 'utility', icon: 'flash', color: '#eab308' },
+  { number: '129', name: 'الصرف الصحي', category: 'utility', icon: 'trash', color: '#64748b' },
+  { number: '19888', name: 'النظافة', category: 'utility', icon: 'leaf', color: '#78716c' },
+];
+
+const CATEGORY_LABELS: Record<EmergencyNumber['category'], string> = {
+  general: 'الطوارئ العامة',
+  medical: 'الخدمات الطبية',
+  helpline: 'خطوط المساعدة',
+  utility: 'المرافق',
+};
+
+const CATEGORY_COLORS: Record<EmergencyNumber['category'], string> = {
+  general: '#ef4444',
+  medical: '#f97316',
+  helpline: '#8b5cf6',
+  utility: '#0ea5e9',
+};
+
+const QUICK_CALLS_TOP = [
+  { number: '997', name: 'إسعاف', icon: 'medkit', color: '#FF3B3B' },
+  { number: '123', name: 'شرطة', icon: 'shield-checkmark', color: '#F59E0B' },
+  { number: '121', name: 'غاز', icon: 'flame', color: '#FF6B6B' },
+  { number: '920033333', name: 'خط صحي', icon: 'call', color: '#00C2FF' },
 ];
 
 // ─── First Aid Data ───────────────────────────────────────────
@@ -270,12 +314,29 @@ export function EmergencyScreen(): React.JSX.Element {
 
   const handleShare = useCallback(async () => {
     try {
+      // Request location permission
+      const Location = require('expo-location');
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('خطأ', 'يرجى السماح بالوصول إلى الموقع من الإعدادات');
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const { latitude, longitude } = loc.coords;
+      const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
       await Share.share({
-        message: isAr
-          ? "أحتاج مساعدة طبية عاجلة! هذا موقعي."
-          : "I need urgent medical help! This is my location.",
+        message: `🚨 موقعي الحالي للطوارئ\n\n📍 ${mapsUrl}`,
+        url: mapsUrl,
       });
-    } catch {}
+    } catch (err) {
+      // Fallback to generic share if location fails
+      try {
+        await Share.share({
+          message: isAr ? 'أحتاج مساعدة طبية عاجلة!' : 'I need urgent medical help!',
+        });
+      } catch { /* ignore */ }
+      Alert.alert('تنبيه', 'تعذر تحديد الموقع، تأكد من تفعيل GPS');
+    }
   }, [isAr]);
 
   const cardBg = darkMode ? "rgba(26,35,50,0.85)" : colors.surface;
@@ -334,9 +395,9 @@ export function EmergencyScreen(): React.JSX.Element {
           <AppText style={[styles.shareText, { color: colors.primary }]}>{t.shareLocation}</AppText>
         </TouchableOpacity>
 
-        {/* ── Quick Call Grid ── */}
+        {/* ── Quick Call Grid (top 4) ── */}
         <View style={styles.grid}>
-          {QUICK_CALLS.map((item) => (
+          {QUICK_CALLS_TOP.map((item) => (
             <TouchableOpacity
               key={item.number}
               activeOpacity={0.82}
@@ -347,7 +408,7 @@ export function EmergencyScreen(): React.JSX.Element {
                 <Ionicons name={item.icon as any} size={22} color={item.color} />
               </View>
               <AppText style={[styles.gridNumber, { color: item.color }]}>{item.number}</AppText>
-              <AppText style={[styles.gridLabel, { color: colors.textPrimary }]}>{t[item.labelKey]}</AppText>
+              <AppText style={[styles.gridLabel, { color: colors.textPrimary }]}>{item.name}</AppText>
               <View style={[styles.callPill, { backgroundColor: item.color + "14" }]}>
                 <Ionicons name="call" size={11} color={item.color} />
                 <AppText style={[styles.callPillText, { color: item.color }]}>{t.call}</AppText>
@@ -355,6 +416,44 @@ export function EmergencyScreen(): React.JSX.Element {
             </TouchableOpacity>
           ))}
         </View>
+
+        {/* ── All Egyptian Emergency Numbers (grouped) ── */}
+        {(['general', 'medical', 'helpline', 'utility'] as const).map((cat) => {
+          const items = EGYPTIAN_EMERGENCY_NUMBERS.filter(n => n.category === cat);
+          return (
+            <View key={cat}>
+              <View style={[styles.categoryHeader, { backgroundColor: CATEGORY_COLORS[cat] + '14' }]}>
+                <AppText style={[styles.categoryLabel, { color: CATEGORY_COLORS[cat] }]}>
+                  {CATEGORY_LABELS[cat]}
+                </AppText>
+              </View>
+              <View style={[styles.card, { backgroundColor: cardBg, borderColor: colors.border }]}>
+                {items.map((item, idx) => (
+                  <TouchableOpacity
+                    key={item.number}
+                    activeOpacity={0.7}
+                    onPress={() => handleCall(item.number)}
+                    style={[
+                      styles.emergencyRow,
+                      idx < items.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border },
+                    ]}
+                  >
+                    <View style={[styles.emergencyIcon, { backgroundColor: item.color + '14' }]}>
+                      <Ionicons name={item.icon as any} size={18} color={item.color} />
+                    </View>
+                    <View style={styles.emergencyInfo}>
+                      <AppText style={[styles.emergencyName, { color: colors.textPrimary }]}>{item.name}</AppText>
+                      <AppText style={[styles.emergencyNumber, { color: item.color }]}>{item.number}</AppText>
+                    </View>
+                    <View style={[styles.callCircle, { backgroundColor: item.color + '14' }]}>
+                      <Ionicons name="call" size={16} color={item.color} />
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          );
+        })}
 
         {/* ── Emergency Contacts ── */}
         <SectionHeader title={t.contacts} icon="people" iconColor={colors.primary} colors={colors} />
@@ -608,6 +707,31 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   callPillText: { fontSize: 12, fontWeight: "800" },
+
+  // Emergency number row
+  categoryHeader: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginBottom: 4,
+  },
+  categoryLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+  emergencyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    gap: 12,
+  },
+  emergencyIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emergencyInfo: { flex: 1, gap: 2 },
+  emergencyName: { fontSize: 14, fontWeight: '700' },
+  emergencyNumber: { fontSize: 12, fontWeight: '600' },
 
   // Section header
   sectionHeader: {

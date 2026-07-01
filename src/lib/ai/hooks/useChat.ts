@@ -191,10 +191,25 @@ export function useChat({ healthContext, isRTL = false, onError }: UseChatOption
           return;
         }
 
-        const errorMessage: string = err?.message ?? 'Failed to get response';
+        const isRateLimit =
+          err?.name === 'AIRateLimitError' ||
+          err?.statusCode === 429 ||
+          err?.isRateLimitError === true ||
+          (typeof err?.message === 'string' && (
+            err.message.startsWith('RateLimitError') ||
+            err.message.includes('429') ||
+            err.message.toLowerCase().includes('rate limit')
+          ));
+
+        const errorMessage: string = isRateLimit
+          ? (isRTL
+            ? 'تم تجاوز حد الطلبات، حاول بعد قليل'
+            : 'Rate limit exceeded, please try again in a moment.')
+          : (err?.message ?? 'Failed to get response');
 
         console.error('[Chat] Generation failed:', {
-          message: errorMessage,
+          message: err?.message ?? String(err),
+          isRateLimit,
           stack: err?.stack,
         });
 
@@ -207,9 +222,13 @@ export function useChat({ healthContext, isRTL = false, onError }: UseChatOption
               ? {
                   ...m,
                   isStreaming: false,
-                  content: isRTL
-                    ? 'عذراً، حدث خطأ. يرجى المحاولة مرة أخرى.'
-                    : 'Sorry, something went wrong. Please try again.',
+                  content: isRateLimit
+                    ? (isRTL
+                      ? 'تم تجاوز حد الطلبات، حاول بعد قليل ⏳'
+                      : 'Rate limit exceeded, please try again in a moment. ⏳')
+                    : (isRTL
+                      ? 'عذراً، حدث خطأ. يرجى المحاولة مرة أخرى.'
+                      : 'Sorry, something went wrong. Please try again.'),
                 }
               : m
           )

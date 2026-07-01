@@ -260,7 +260,34 @@ export function EmergencyProfileScreen({ navigation }: Props): React.JSX.Element
             )}
           </CollapsibleSection>
 
-          <View style={{ height: 110 }} />
+          {/* ── Full-width Save Button ── */}
+          <View style={styles.saveButtonWrap}>
+            <TouchableOpacity
+              style={[
+                styles.saveButton,
+                { backgroundColor: isDirty ? colors.primary : colors.primary + '55' },
+              ]}
+              onPress={save}
+              disabled={saving || !isDirty}
+              activeOpacity={0.8}
+            >
+              {saving ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                  <AppText style={styles.saveButtonText}>حفظ</AppText>
+                </>
+              )}
+            </TouchableOpacity>
+            {!isDirty && !saving && (
+              <AppText style={[styles.noChangesText, { color: colors.textSecondary }]}>
+                لا توجد تغييرات غير محفوظة
+              </AppText>
+            )}
+          </View>
+
+          <View style={{ height: 120 }} />
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -314,6 +341,10 @@ const styles = StyleSheet.create({
   geoText: { fontSize: 12, fontWeight: '500', marginTop: 4 },
   addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed' },
   addBtnText: { fontSize: 13, fontWeight: '700' },
+  saveButtonWrap: { marginTop: spacing.md, gap: 8 },
+  saveButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16, borderRadius: 14 },
+  saveButtonText: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  noChangesText: { textAlign: 'center', fontSize: 12, fontWeight: '500' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
   modalContent: { borderRadius: 24, padding: 24, gap: 12 },
   modalTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 4 },

@@ -1,5 +1,6 @@
 import { providerManager } from '../providers/manager';
 import { AIProvider } from '../providers/types';
+import { AIRateLimitError } from '../providers/types';
 import { env } from '../../../config/env';
 import { MedicalSafetyValidator } from '../safety/MedicalSafetyValidator';
 
@@ -48,13 +49,13 @@ export interface AIConfig {
 }
 
 const DEFAULT_CONFIG: AIConfig = {
-  model: 'openai/gpt-oss-120b:free',
+  model: 'meta-llama/llama-3.1-8b-instruct:free',
   maxTokens: 2000,
   temperature: 0.7,
-  reasoningEnabled: true,
+  reasoningEnabled: false, // Not supported on free-tier models
   streamingEnabled: false,
   fallbackEnabled: true,
-  maxRetries: 3,
+  maxRetries: 1,
   timeoutMs: 60000,
 };
 
@@ -443,9 +444,8 @@ class AIManager {
       stream: false,
     };
 
-    if (this.config.reasoningEnabled) {
-      body.reasoning = { effort: 'high' };
-    }
+    // NOTE: Do NOT send `reasoning` parameter — not supported by free-tier models
+    //       and causes 400/unsupported_parameter errors on OpenRouter.
 
     const controller = createTimeoutController(this.config.timeoutMs);
 
@@ -465,17 +465,31 @@ class AIManager {
     if (!response.ok) {
       let errorBody = '';
       try { errorBody = await response.text(); } catch { errorBody = '(could not read error body)'; }
+      if (response.status === 429) {
+        throw new AIRateLimitError(provider.name);
+      }
       throw new Error(`[AI Manager] API error ${response.status}: ${errorBody.slice(0, 400)}`);
     }
 
     return response;
   }
 
-  private getApiUrl(_modelId: string): string {
+  private getApiUrl(modelId: string): string {
+    // If the active provider is Groq, use Groq endpoint
+    if (modelId && (modelId.includes('groq') || (env.groqApiKey && !env.openRouterApiKey))) {
+      return 'https://api.groq.com/openai/v1/chat/completions';
+    }
     return 'https://openrouter.ai/api/v1/chat/completions';
   }
 
-  private getHeaders(_modelId: string): HeadersInit {
+  private getHeaders(modelId: string): HeadersInit {
+    const isGroq = modelId && (modelId.includes('groq') || (env.groqApiKey && !env.openRouterApiKey));
+    if (isGroq && env.groqApiKey) {
+      return {
+        Authorization: `Bearer ${env.groqApiKey}`,
+        'Content-Type': 'application/json',
+      };
+    }
     return {
       Authorization: `Bearer ${env.openRouterApiKey || ''}`,
       'Content-Type': 'application/json',

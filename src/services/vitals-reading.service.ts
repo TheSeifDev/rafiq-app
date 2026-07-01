@@ -4,6 +4,7 @@ import { toFiniteNumberOrNull } from '../utils/number';
 import { createUuid } from '../local/db';
 import { listWhere, upsertLocal } from '../local/repository';
 import { localSyncEngine } from '../local/syncEngine';
+import { isUuid } from '../utils/uuid';
 
 function normalizeVitalsReading(reading: unknown): VitalsReading {
   const row = (reading ?? {}) as Partial<VitalsReading> & Record<string, unknown>;
@@ -31,6 +32,12 @@ export const vitalsReadingService = {
     );
     if (local.length > 0) return local.map(normalizeVitalsReading);
 
+    // Guard: Supabase patient_id column is uuid type — non-UUID IDs will be rejected
+    if (!isUuid(patientId)) {
+      console.warn('[VitalsReadingService] Skipping Supabase fallback: patientId is not a UUID', patientId);
+      return [];
+    }
+
     const { data, error } = await supabase
       .from('vitals_readings')
       .select('*')
@@ -55,6 +62,12 @@ export const vitalsReadingService = {
       'recorded_at DESC LIMIT 1',
     );
     if (local[0]) return normalizeVitalsReading(local[0]);
+
+    // Guard: Supabase patient_id column is uuid type — non-UUID IDs will be rejected
+    if (!isUuid(patientId)) {
+      console.warn('[VitalsReadingService] Skipping Supabase fallback: patientId is not a UUID', patientId);
+      return null;
+    }
 
     const { data, error } = await supabase
       .from('vitals_readings')

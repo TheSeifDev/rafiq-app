@@ -8,14 +8,10 @@ function generateUUID(): string {
   return crypto.randomUUID();
 }
 
-export function generateId(prefix?: string): string {
-  const uuid = generateUUID();
-
-  if (prefix) {
-    return `${prefix}_${uuid}`;
-  }
-
-  return uuid;
+export function generateId(_prefix?: string): string {
+  // Always return a bare UUID — Supabase uuid columns reject prefixed IDs.
+  // The prefix parameter is kept for API compatibility but is intentionally ignored.
+  return generateUUID();
 }
 
 export function sanitizeBindings(

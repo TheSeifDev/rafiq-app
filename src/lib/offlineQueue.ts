@@ -152,29 +152,30 @@ export const offlineQueue = {
     if (_isProcessing) return { processed: 0, failed: 0 };
     _isProcessing = true;
 
-    let processed = 0;
-    let failed = 0;
-
     try {
       const queue = await getQueue();
+      if (queue.length === 0) return { processed: 0, failed: 0 };
+
+      // Trigger the sync service which handles actual Supabase push via pending_sync table
+      // Import lazily to avoid circular dependency at module init time
+      try {
+        const { syncService } = require('../services/sync.service') as typeof import('../services/sync.service');
+        syncService.syncNow();
+      } catch (importErr) {
+        console.warn('[offlineQueue] Could not trigger sync (non-fatal):', importErr);
+      }
+
       const meta = await getMeta();
-
-      processed = queue.length;
-
-      meta.lastSync = new Date().toISOString();
+      meta.lastPush = new Date().toISOString();
       await saveMeta(meta);
 
-      if (processed > 0) {
-        await saveQueue([]);
-      }
+      return { processed: queue.length, failed: 0 };
     } catch (err) {
       console.error('[offlineQueue] Queue processing failed:', err);
-      failed = 1;
+      return { processed: 0, failed: 1 };
     } finally {
       _isProcessing = false;
     }
-
-    return { processed, failed };
   },
 
   get isProcessing(): boolean {

@@ -301,10 +301,26 @@ export function useAICHat({
           return;
         }
 
-        const errorMessage: string = err?.message ?? 'Failed to get response';
+        // Detect 429 / rate limit errors from any layer
+        const isRateLimit =
+          err?.name === 'AIRateLimitError' ||
+          err?.statusCode === 429 ||
+          err?.isRateLimitError === true ||
+          (typeof err?.message === 'string' && (
+            err.message.startsWith('RateLimitError') ||
+            err.message.includes('429') ||
+            err.message.toLowerCase().includes('rate limit')
+          ));
+
+        const errorMessage: string = isRateLimit
+          ? (isRTL
+            ? 'تم تجاوز حد الطلبات، حاول بعد قليل'
+            : 'Rate limit exceeded, please try again in a moment.')
+          : (err?.message ?? 'Failed to get response');
 
         console.error('[AI Chat] Generation failed:', {
-          message: errorMessage,
+          message: err?.message ?? String(err),
+          isRateLimit,
           stack: err?.stack,
         });
 
@@ -319,9 +335,13 @@ export function useAICHat({
               ? {
                 ...m,
                 isStreaming: false,
-                content: isRTL
-                  ? '\u0639\u0630\u0631\u0627\u064b\u060c \u062d\u062f\u062b \u062e\u0637\u0623 \u0641\u064a \u0627\u0644\u0627\u062a\u0635\u0627\u0644. \u064a\u0631\u062c\u0649 \u0627\u0644\u0645\u062d\u0627\u0648\u0644\u0629 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.'
-                  : 'Sorry, there was a connection error. Please try again.',
+                content: isRateLimit
+                  ? (isRTL
+                    ? 'تم تجاوز حد الطلبات، حاول بعد قليل ⏳'
+                    : 'Rate limit exceeded, please try again in a moment. ⏳')
+                  : (isRTL
+                    ? 'عذراً، حدث خطأ في الاتصال. يرجى المحاولة مرة أخرى.'
+                    : 'Sorry, there was a connection error. Please try again.'),
               }
               : m
           ),

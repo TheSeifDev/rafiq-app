@@ -9,10 +9,6 @@ import type { ProfileStackScreenProps } from '../navigation/types';
 
 type Props = ProfileStackScreenProps<'Settings'>;
 
-/**
- * Legacy settings screen — preferences are now embedded in ProfileScreen.
- * This screen is kept for backward compatibility but simply redirects context.
- */
 export function SettingsScreen({ navigation }: Props): React.JSX.Element {
   const { colors } = useTheme();
   const language = useAppStore((s) => s.language);

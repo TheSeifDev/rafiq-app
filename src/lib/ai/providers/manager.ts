@@ -1,7 +1,16 @@
-import { AIProvider, AIMessage, HealthContext, StreamingCallback, AIResponse, AIProviderError } from "./types";
+import { AIProvider, AIMessage, HealthContext, StreamingCallback, AIResponse, AIProviderError, AIRateLimitError } from "./types";
 import { openRouterProvider } from "./OpenRouterProvider";
+import { groqProvider } from "./GroqProvider";
 
-const MAX_RETRIES = 2;
+/**
+ * ARABIC rate-limit message shown in the chat UI when all providers are 429.
+ * "Rate limit exceeded, please try again in a moment."
+ */
+export const RATE_LIMIT_MESSAGE_AR = 'تم تجاوز حد الطلبات، حاول بعد قليل';
+export const RATE_LIMIT_MESSAGE_EN = 'Rate limit exceeded, please try again in a moment.';
+
+// Simple retry count — don't retry on 429 errors
+const MAX_RETRIES = 1;
 
 class MinimalFallbackProvider implements AIProvider {
   name = "Unavailable";
@@ -34,10 +43,12 @@ class MinimalFallbackProvider implements AIProvider {
 
 class ProviderManager {
   private primary: AIProvider;
+  private secondary: AIProvider;
   private fallback: MinimalFallbackProvider;
 
   constructor() {
     this.primary = openRouterProvider;
+    this.secondary = groqProvider;
     this.fallback = new MinimalFallbackProvider();
   }
 
@@ -45,59 +56,82 @@ class ProviderManager {
     return this.primary;
   }
 
+  /**
+   * Try primary (OpenRouter), then secondary (Groq), then show error.
+   * On 429 from primary → immediately try secondary without retry.
+   * On 429 from secondary → throw AIRateLimitError so UI shows Arabic message.
+   */
   async generate(
     messages: AIMessage[],
     context: HealthContext,
     retries: number = MAX_RETRIES
   ): Promise<AIResponse> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        const isAvailable = await this.primary.isAvailable();
-        if (!isAvailable) {
-          throw new AIProviderError("Provider not available", this.primary.id, 503, true);
-        }
-
+    // --- Try PRIMARY ---
+    try {
+      const isAvailable = await this.primary.isAvailable();
+      if (isAvailable) {
         const response = await this.primary.generate(messages, context);
-
         return {
           content: response.content,
           provider: this.primary.name,
           model: this.primary.id,
           finishReason: "stop",
         };
-      } catch (error) {
-        lastError = error as Error;
+      }
+    } catch (primaryError) {
+      const isRateLimit = primaryError instanceof AIRateLimitError ||
+        (primaryError instanceof Error && primaryError.message.startsWith('RateLimitError'));
 
-        if (error instanceof AIProviderError && !error.isRetryable) {
-          break;
-        }
-
-        console.log(`[Provider] Attempt ${attempt + 1} failed:`, (error as Error).message);
-
-        if (attempt < retries) {
-          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+      if (!isRateLimit) {
+        // Non-429 primary failure: retry up to MAX_RETRIES then try secondary
+        for (let attempt = 0; attempt < retries; attempt++) {
+          try {
+            const response = await this.primary.generate(messages, context);
+            return {
+              content: response.content,
+              provider: this.primary.name,
+              model: this.primary.id,
+              finishReason: "stop",
+            };
+          } catch {
+            await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+          }
         }
       }
+      // Fall through to secondary
+      console.warn('[ProviderManager] Primary failed, trying secondary (Groq)');
     }
 
+    // --- Try SECONDARY (Groq) ---
     try {
-      const response = await this.fallback.generate(messages, context);
-      return {
-        content: response.content,
-        provider: this.fallback.name,
-        model: this.fallback.id,
-        finishReason: "stop",
-      };
-    } catch {
-      return {
-        content: "AI service temporarily unavailable. Please try again.",
-        provider: this.fallback.name,
-        model: this.fallback.id,
-        finishReason: "error",
-      };
+      const isAvailable = await this.secondary.isAvailable();
+      if (isAvailable) {
+        const response = await this.secondary.generate(messages, context);
+        return {
+          content: response.content,
+          provider: this.secondary.name,
+          model: this.secondary.id,
+          finishReason: "stop",
+        };
+      }
+    } catch (secondaryError) {
+      const isRateLimit = secondaryError instanceof AIRateLimitError ||
+        (secondaryError instanceof Error && secondaryError.message.startsWith('RateLimitError'));
+
+      if (isRateLimit) {
+        // Both providers rate-limited → surface Arabic message
+        throw new AIRateLimitError('all');
+      }
+      console.warn('[ProviderManager] Secondary (Groq) also failed:', (secondaryError as Error).message);
     }
+
+    // --- Final fallback (just error) ---
+    return {
+      content: "AI service temporarily unavailable. Please try again.",
+      provider: this.fallback.name,
+      model: this.fallback.id,
+      finishReason: "error",
+    };
   }
 
   async generateStreaming(
@@ -107,56 +141,66 @@ class ProviderManager {
     signal?: AbortSignal,
     retries: number = MAX_RETRIES
   ): Promise<AIResponse> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        const isAvailable = await this.primary.isAvailable();
-        if (!isAvailable) {
-          throw new AIProviderError("Provider not available", this.primary.id, 503, true);
-        }
-
+    // Primary
+    try {
+      const isAvailable = await this.primary.isAvailable();
+      if (isAvailable) {
         const content = await this.primary.generateStreaming(messages, context, onChunk, signal);
-
         return {
           content,
           provider: this.primary.name,
           model: this.primary.id,
           finishReason: "stop",
         };
-      } catch (error) {
-        lastError = error as Error;
-
-        if (error instanceof AIProviderError && !error.isRetryable) {
-          break;
-        }
-
-        console.log(`[Provider] Stream attempt ${attempt + 1} failed:`, (error as Error).message);
-
-        if (attempt < retries) {
-          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+      }
+    } catch (primaryError) {
+      const isRateLimit = primaryError instanceof AIRateLimitError ||
+        (primaryError instanceof Error && primaryError.message.startsWith('RateLimitError'));
+      if (!isRateLimit) {
+        for (let attempt = 0; attempt < retries; attempt++) {
+          try {
+            const content = await this.primary.generateStreaming(messages, context, onChunk, signal);
+            return {
+              content,
+              provider: this.primary.name,
+              model: this.primary.id,
+              finishReason: "stop",
+            };
+          } catch {
+            await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+          }
         }
       }
     }
 
+    // Secondary
     try {
-      const content = await this.fallback.generateStreaming(messages, context, onChunk, signal);
-      return {
-        content,
-        provider: this.fallback.name,
-        model: this.fallback.id,
-        finishReason: "stop",
-      };
-    } catch {
-      const message = "AI service temporarily unavailable. Please try again.";
-      onChunk(message);
-      return {
-        content: message,
-        provider: this.fallback.name,
-        model: this.fallback.id,
-        finishReason: "error",
-      };
+      const isAvailable = await this.secondary.isAvailable();
+      if (isAvailable) {
+        const content = await this.secondary.generateStreaming(messages, context, onChunk, signal);
+        return {
+          content,
+          provider: this.secondary.name,
+          model: this.secondary.id,
+          finishReason: "stop",
+        };
+      }
+    } catch (secondaryError) {
+      const isRateLimit = secondaryError instanceof AIRateLimitError ||
+        (secondaryError instanceof Error && secondaryError.message.startsWith('RateLimitError'));
+      if (isRateLimit) {
+        throw new AIRateLimitError('all');
+      }
     }
+
+    const message = "AI service temporarily unavailable. Please try again.";
+    onChunk(message);
+    return {
+      content: message,
+      provider: this.fallback.name,
+      model: this.fallback.id,
+      finishReason: "error",
+    };
   }
 }
 

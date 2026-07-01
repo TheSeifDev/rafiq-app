@@ -171,6 +171,24 @@ export async function initializeNotificationChannels(): Promise<void> {
       console.warn(`[NotificationChannels] Failed to set channel ${channel.id}:`, err);
     }
   }
+
+  // Register medication action category (works in Expo Go — local only)
+  try {
+    await Notifications.setNotificationCategoryAsync('MEDICATION_REMINDER', [
+      {
+        identifier: 'TAKEN',
+        buttonTitle: '✅ أخذت الدواء',
+        options: { opensAppToForeground: false },
+      },
+      {
+        identifier: 'SNOOZE_5MIN',
+        buttonTitle: '⏰ بعد 5 دقائق',
+        options: { opensAppToForeground: false },
+      },
+    ]);
+  } catch (err) {
+    console.warn('[NotificationChannels] Failed to set MEDICATION_REMINDER category:', err);
+  }
 }
 
 // ─── Global Handler (instant response) ─────────────────────────────────────
@@ -191,18 +209,62 @@ Notifications.setNotificationHandler({
       shouldBeSilenced: !isEmergency && data?.silent === true,
     };
   },
-  handleSuccess: async (notificationId) => {
-    // Mark as delivered in queue
-    await markAsDelivered(notificationId);
-    console.log('[NotificationHandler] Delivered:', notificationId);
-  },
-  handleError: async (notificationId, error) => {
-    console.error('[NotificationHandler] Failed:', notificationId, error);
-    // Re-queue for retry
-    if (notificationId) {
-      await requeueFailed(notificationId);
+  // NOTE: handleSuccess and handleError are NOT valid in expo-notifications SDK 53+
+  // They were removed from the API. Delivery tracking is done via the queue.
+});
+
+// ─── Medication Action Button Handler ────────────────────────────────────────
+// Handles TAKEN and SNOOZE_5MIN action buttons on medication reminders.
+// Registered once here so it works even when the app is in background.
+
+Notifications.addNotificationResponseReceivedListener(async (response) => {
+  const data = response.notification.request.content.data as Record<string, unknown> | undefined;
+  const type = data?.type as string | undefined;
+  const medicationId = data?.medicationId as string | undefined;
+  const actionId = response.actionIdentifier;
+
+  // Only handle medication reminders with action buttons
+  if (type !== 'medication_reminder' || !medicationId) return;
+
+  if (actionId === 'TAKEN') {
+    // Mark dose taken in SQLite (via medication service lazy import)
+    try {
+      const { medicationService } = require('../../services/medication.service') as typeof import('../../services/medication.service');
+      await medicationService.markDoseTaken(medicationId);
+    } catch (err) {
+      console.warn('[MedAction] markDoseTaken failed:', err);
     }
-  },
+    // Dismiss this notification
+    try {
+      await Notifications.dismissNotificationAsync(response.notification.request.identifier);
+    } catch { /* ignore */ }
+
+  } else if (actionId === 'SNOOZE_5MIN') {
+    // Re-schedule 5 minutes later with same content
+    try {
+      const src = response.notification.request.content;
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: src.title ?? undefined,
+          subtitle: src.subtitle ?? undefined,
+          body: src.body ?? undefined,
+          data: (src.data as Record<string, unknown>) ?? {},
+          sound: (src.sound as 'default' | undefined) ?? 'default',
+          // Re-attach categoryIdentifier so action buttons persist
+          categoryIdentifier: 'MEDICATION_REMINDER',
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+          seconds: 300, // 5 minutes
+        },
+      });
+    } catch (err) {
+      console.warn('[MedAction] snooze reschedule failed:', err);
+    }
+    try {
+      await Notifications.dismissNotificationAsync(response.notification.request.identifier);
+    } catch { /* ignore */ }
+  }
 });
 
 // ─── Queue Management ────────────────────────────────────────────────────────

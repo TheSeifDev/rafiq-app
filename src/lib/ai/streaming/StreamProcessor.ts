@@ -193,6 +193,15 @@ export async function fetchWithRetry(
 
       clearTimeout(timeoutId);
 
+      // Never retry 429 — retrying rate-limited requests wastes quota
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After');
+        const err = new Error(`RateLimitError: 429 Too Many Requests${retryAfter ? ` (retry after ${retryAfter}s)` : ''}`);
+        (err as any).statusCode = 429;
+        (err as any).isRateLimitError = true;
+        throw err;
+      }
+
       // Retry on server errors (5xx) but not on 4xx
       if (!response.ok && response.status >= 500 && attempt < config.maxRetries) {
         const delay = config.retryDelayMs * Math.pow(2, attempt);
