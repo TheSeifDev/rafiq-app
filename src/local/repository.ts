@@ -5,9 +5,9 @@ export type SyncPriority = 'low' | 'normal' | 'high' | 'critical';
 
 const TABLE_COLUMNS: Record<string, string[]> = {
   profiles: ['id', 'email', 'full_name', 'phone', 'avatar_url', 'role', 'created_at', 'updated_at'],
-  patients: ['id', 'legacy_id', 'user_id', 'full_name', 'age', 'gender', 'blood_type', 'phone', 'birth_date', 'height_cm', 'weight_kg', 'medical_history', 'allergies', 'chronic_conditions', 'emergency_notes', 'condition_type', 'risk_level', 'notes', 'relationship', 'address', 'emergency_contact', 'location', 'address_data', 'reporter_data', 'hospital_data', 'latitude', 'longitude', 'geocoded_address', 'device_id', 'version', 'deleted_at', 'created_at', 'updated_at'],
-  patient_conditions: ['id', 'patient_id', 'user_id', 'condition_key', 'custom_note', 'created_at', 'updated_at'],
-  emergency_contacts: ['id', 'legacy_id', 'patient_id', 'user_id', 'name', 'relation', 'relationship', 'phone', 'phone_number', 'email', 'priority', 'is_primary', 'created_at', 'updated_at'],
+  patients: ['id', 'legacy_id', 'user_id', 'full_name', 'age', 'gender', 'blood_type', 'phone', 'birth_date', 'height_cm', 'weight_kg', 'medical_history', 'allergies', 'chronic_conditions', 'emergency_notes', 'condition_type', 'risk_level', 'notes', 'relationship', 'address', 'emergency_contact', 'location', 'address_data', 'reporter_data', 'hospital_data', 'latitude', 'longitude', 'geocoded_address', 'device_id', 'version', 'is_deleted', 'updated_by_device', 'deleted_by', 'deleted_at', 'created_at', 'updated_at'],
+  patient_conditions: ['id', 'patient_id', 'user_id', 'condition_name', 'severity', 'diagnosed_date', 'notes', 'is_active', 'is_deleted', 'updated_by_device', 'deleted_by', 'deleted_at', 'created_at', 'updated_at'],
+  emergency_contacts: ['id', 'legacy_id', 'patient_id', 'user_id', 'name', 'relation', 'relationship', 'phone', 'phone_number', 'email', 'priority', 'is_primary', 'is_deleted', 'updated_by_device', 'deleted_by', 'deleted_at', 'created_at', 'updated_at'],
   devices: ['id', 'legacy_id', 'patient_id', 'user_id', 'device_name', 'name', 'device_type', 'type', 'mac_address', 'ip_address', 'firmware_version', 'status', 'last_seen', 'battery_level', 'signal_strength', 'location', 'mqtt_topic', 'config', 'metadata', 'created_at', 'updated_at'],
   esp32_devices: ['id', 'device_id', 'patient_id', 'user_id', 'chip_id', 'mqtt_client_id', 'board_type', 'firmware_version', 'ip_address', 'last_boot_at', 'last_seen', 'metadata', 'created_at', 'updated_at'],
   wearables: ['id', 'patient_id', 'user_id', 'device_id', 'device_name', 'device_model', 'mac_address', 'ble_uuid', 'paired_at', 'last_sync', 'battery_level', 'firmware_version', 'status', 'config', 'is_primary', 'created_at', 'updated_at'],
@@ -48,7 +48,7 @@ const JSON_COLUMNS = new Set([
 ]);
 
 const BOOL_COLUMNS = new Set([
-  'is_primary', 'active', 'is_active', 'skipped', 'done', 'completed', 'is_read', 'is_pinned',
+  'is_primary', 'active', 'is_active', 'is_deleted', 'skipped', 'done', 'completed', 'is_read', 'is_pinned',
   'resolved', 'emergency_triggered', 'retain', 'presence',
 ]);
 

@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { createUuid } from '../local/db';
 import { listWhere, upsertLocal } from '../local/repository';
+import { isUuid } from '../utils/uuid';
 
 export type VitalsRecord = {
   id: string;
@@ -25,6 +26,12 @@ export const vitalsService = {
     );
     if (local.length > 0) return local as unknown as VitalsRecord[];
 
+    // Guard: Supabase columns are UUID type — non-UUID patient IDs will be rejected
+    if (!isUuid(patientId)) {
+      console.warn('[VitalsService] Skipping Supabase fallback: patientId is not a UUID', patientId);
+      return [];
+    }
+
     let query = supabase.from('vitals').select('*').eq('patient_id', patientId).order('recorded_at', { ascending: false });
     if (limitDays) query = query.limit(limitDays);
     const { data, error } = await query;
@@ -40,6 +47,12 @@ export const vitalsService = {
   async getLatestVitals(patientId: string): Promise<VitalsRecord | null> {
     const local = await listWhere<Record<string, unknown>>('vitals', 'patient_id = ?', [patientId], 'recorded_at DESC LIMIT 1');
     if (local[0]) return local[0] as unknown as VitalsRecord;
+
+    // Guard: Supabase columns are UUID type — non-UUID patient IDs will be rejected
+    if (!isUuid(patientId)) {
+      console.warn('[VitalsService] Skipping Supabase fallback: patientId is not a UUID', patientId);
+      return null;
+    }
 
     const { data, error } = await supabase.from('vitals').select('*').eq('patient_id', patientId).order('recorded_at', { ascending: false }).limit(1).maybeSingle();
     if (error) throw new Error(error.message);

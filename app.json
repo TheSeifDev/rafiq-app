@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "rafiq-app",
-    "slug": "rafiq-App",
+    "name": "rafiq",
+    "slug": "rafiq",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -64,7 +64,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "d0a8471f-63ae-4bc9-861c-7df78abfe7f8"
+        "projectId": "7cb4e8a6-b09e-465c-92a7-7b087472ffad"
       }
     },
     "runtimeVersion": {
@@ -72,6 +72,7 @@
     },
     "updates": {
       "url": "https://u.expo.dev/d0a8471f-63ae-4bc9-861c-7df78abfe7f8"
-    }
+    },
+    "owner": "seifkn"
   }
 }

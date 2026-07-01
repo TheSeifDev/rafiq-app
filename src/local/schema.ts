@@ -1,4 +1,4 @@
-export const RAFIQ_SQLITE_SCHEMA_VERSION = 3;
+export const RAFIQ_SQLITE_SCHEMA_VERSION = 6;
 
 export const RAFIQ_SQLITE_SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS patients (
   geocoded_address TEXT,
   device_id TEXT,
   version INTEGER NOT NULL DEFAULT 1,
+  is_deleted INTEGER NOT NULL DEFAULT 0,
+  updated_by_device TEXT,
+  deleted_by TEXT,
   deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -62,11 +65,17 @@ CREATE TABLE IF NOT EXISTS patient_conditions (
   id TEXT PRIMARY KEY,
   patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   user_id TEXT,
-  condition_key TEXT NOT NULL,
-  custom_note TEXT,
+  condition_name TEXT NOT NULL,
+  severity TEXT,
+  diagnosed_date TEXT,
+  notes TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  is_deleted INTEGER NOT NULL DEFAULT 0,
+  updated_by_device TEXT,
+  deleted_by TEXT,
+  deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(patient_id, condition_key)
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS emergency_contacts (
@@ -82,6 +91,10 @@ CREATE TABLE IF NOT EXISTS emergency_contacts (
   email TEXT,
   priority INTEGER NOT NULL DEFAULT 1,
   is_primary INTEGER NOT NULL DEFAULT 0,
+  is_deleted INTEGER NOT NULL DEFAULT 0,
+  updated_by_device TEXT,
+  deleted_by TEXT,
+  deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
