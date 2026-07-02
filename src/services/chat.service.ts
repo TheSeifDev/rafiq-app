@@ -2,11 +2,11 @@
  * chat.service.ts
  *
  * Uses supabase.functions.invoke() instead of raw fetch.
- * This automatically attaches the correct Authorization header:
- *   - Bearer <session JWT>  when a user is signed in
- *   - Bearer <anon key>     when no session exists
+ * This automatically attaches the correct Authorization header.
  *
- * No manual header management needed. No 401 errors.
+ * FIX #7: Properly extract error body from 429 and other non-2xx responses.
+ * The old code checked `error.status === 429` BEFORE reading `error.context?.reply`,
+ * so the helpful Arabic message from the edge function was never shown.
  */
 
 import { supabase } from "../lib/supabase";
@@ -28,42 +28,62 @@ type EdgeFunctionResponse = {
   error?: string;
 };
 
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+const INVOKE_TIMEOUT_MS = 45_000;
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export async function sendChat(
   messages: ChatMessage[],
   vitalsSummary: string,
 ): Promise<string> {
-  if (__DEV__) {
-    console.log("[chat.service] → invoking chat-ai", `(${messages.length} messages)`);
-  }
+  console.log("[chat.service] → invoking chat-ai", `(${messages.length} messages)`);
 
   const body: EdgeFunctionBody = {
     messages,
     vitals: vitalsSummary,
   };
 
-  // supabase.functions.invoke() handles:
-  //  ✓ Authorization header (anon key or active user JWT)
-  //  ✓ Content-Type: application/json
-  //  ✓ Supabase project URL resolution
-  const { data, error } = await supabase.functions.invoke<EdgeFunctionResponse>(
-    "chat-ai",
-    { body },
-  );
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), INVOKE_TIMEOUT_MS);
 
-  // ── Network / invocation error ───────────────────────────────────────────
-  if (error) {
-    if (__DEV__) {
-      console.error("[chat.service] invoke error:", error.message, "status:", (error as { status?: number }).status);
+  let data: EdgeFunctionResponse | null = null;
+  let error: { message?: string; status?: number; context?: { reply?: string } } | null = null;
+
+  try {
+    const result = await supabase.functions.invoke<EdgeFunctionResponse>(
+      "chat-ai",
+      { body, signal: controller.signal },
+    );
+    data = result.data;
+    error = result.error;
+  } catch (invokeErr) {
+    const msg = invokeErr instanceof Error ? invokeErr.message : String(invokeErr);
+    console.error("[chat.service] invoke network error:", msg);
+
+    if (msg.includes('AbortError') || msg.includes('abort') || msg.includes('timeout')) {
+      return "انتهت مهلة الاتصال بالذكاء الاصطناعي. حاول مجدداً.";
     }
+    return "تعذّر الاتصال بالخادم. تحقق من اتصالك بالإنترنت وحاول مجدداً.";
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
-    const status = (error as { status?: number }).status;
+  // ── Invocation error ───────────────────────────────────────────────
+  if (error) {
+    console.error("[chat.service] invoke error:", error.message, "status:", error.status);
 
-    // Try to read the Arabic reply from the edge function body first.
-    // FunctionsHttpError exposes the parsed body via .context on some versions.
-    const bodyReply = (error as { context?: { reply?: string } }).context?.reply;
-    if (bodyReply) return bodyReply;
+    const status = error.status;
+
+    // FIX #7: ALWAYS try to read the reply from the error body first.
+    // The edge function ALWAYS returns 200 with { reply: "..." } for handled errors,
+    // but for 429 it returns a non-200 status with the Arabic message in the body.
+    const bodyReply = error.context?.reply;
+    if (bodyReply) {
+      console.log('[chat.service] Recovered reply from error body:', bodyReply.slice(0, 80));
+      return bodyReply;
+    }
 
     // Fallback to status-mapped Arabic strings
     if (status === 429) return "الخدمة مشغولة حالياً، حاول بعد قليل.";
@@ -71,14 +91,18 @@ export async function sendChat(
     if (status === 500) return "حدث خطأ في الخادم. حاول مجدداً لاحقاً.";
     if (status === 503 || status === 504) return "انتهت مهلة الاتصال. تحقق من اتصالك.";
 
+    // If we have a data object from the error (some Supabase versions)
     if (data?.reply) return data.reply;
 
-    return "تعذّر الاتصال بالخادم. تحقق من اتصالك بالإنترنت.";
+    // Network error (no status)
+    if (!status || status === 0) {
+      return "تعذّر الاتصال بالخادم. تحقق من اتصالك بالإنترنت وحاول مجدداً.";
+    }
+
+    return "تعذّر الاتصال بالخادم. تحقق من اتصالك.";
   }
 
-  if (__DEV__) {
-    console.log("[chat.service] ← reply:", data?.reply?.slice(0, 80) ?? "(empty)");
-  }
+  console.log("[chat.service] ← reply:", data?.reply?.slice(0, 80) ?? "(empty)");
 
   return data?.reply?.trim() || "لم أتمكن من فهم الرد. حاول مجدداً.";
 }

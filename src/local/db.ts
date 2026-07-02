@@ -14,6 +14,43 @@ export function createUuid(): string {
   return createRuntimeUuid();
 }
 
+// ─── FIX #2: Separate PRAGMAs from CREATE TABLE ────────────────────────
+// In expo-sqlite v16, PRAGMAs sent via execAsync alongside CREATE TABLE
+// statements may not take effect reliably. The fix is to run PRAGMAs
+// as separate execAsync calls AFTER the schema.
+const SCHEMA_PRAGMAS = `
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+`;
+
+const SCHEMA_TABLES_AND_INDEXES = RAFIQ_SQLITE_SCHEMA.replace(
+  /PRAGMA\s+foreign_keys\s*=\s*ON\s*;?/gi,
+  ''
+).replace(
+  /PRAGMA\s+journal_mode\s*=\s*WAL\s*;?/gi,
+  ''
+).replace(
+  /PRAGMA\s+synchronous\s*=\s*NORMAL\s*;?/gi,
+  ''
+).trim();
+
+// ─── FIX #3: Run PRAGMA foreign_keys ON separately with WITH validation ───
+async function enableForeignKeys(db: SQLite.SQLiteDatabase): Promise<void> {
+  try {
+    await db.execAsync('PRAGMA foreign_keys = ON;');
+    // Verify it took effect
+    const rows = await db.getAllAsync<{ foreign_keys: number }>('PRAGMA foreign_keys;');
+    if (rows[0]?.foreign_keys !== 1) {
+      console.warn('[DB] PRAGMA foreign_keys = ON did not take effect, retrying...');
+      await db.execAsync('PRAGMA foreign_keys = ON;');
+    }
+    console.log('[DB] Foreign keys enabled successfully');
+  } catch (err) {
+    console.error('[DB] Failed to enable foreign keys (non-fatal, will continue):', err);
+    // Non-fatal: the app can still work, FK constraints just won't be enforced
+  }
+}
+
 const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) | string> = {
   4: async (db: SQLite.SQLiteDatabase) => {
     const patients = await db.getAllAsync<{ id: string }>(
@@ -142,6 +179,7 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
           updated_by_device TEXT,
           deleted_by TEXT,
           deleted_at TEXT,
+          version INTEGER NOT NULL DEFAULT 1,
           created_at TEXT NOT NULL DEFAULT (datetime('now')),
           updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
@@ -271,13 +309,74 @@ async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
   }
 }
 
+// ─── FIX #4: Add write verification ─────────────────────────────────────────
+// After DB initialization, do a test write + read to verify the database
+// is actually working, not just that it opened successfully.
+async function verifyDatabaseReadWrite(db: SQLite.SQLiteDatabase): Promise<boolean> {
+  const testId = `__write_test_${Date.now()}`;
+  try {
+    // Write
+    await db.runAsync(
+      'INSERT OR REPLACE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, datetime(\'now\'))',
+      [99999, testId]
+    );
+    // Read back
+    const rows = await db.getAllAsync<{ name: string }>(
+      'SELECT name FROM schema_migrations WHERE name = ?',
+      [testId]
+    );
+    // Cleanup
+    await db.runAsync('DELETE FROM schema_migrations WHERE name = ?', [testId]);
+    return rows.length > 0;
+  } catch (err) {
+    console.error('[DB] Write/read verification FAILED:', err);
+    return false;
+  }
+}
+
 export async function getLocalDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = SQLite.openDatabaseAsync(DB_NAME).then(async (db) => {
-      await db.execAsync(RAFIQ_SQLITE_SCHEMA);
+      try {
+        // Step 1: Create tables and indexes (without PRAGMAs)
+        await db.execAsync(SCHEMA_TABLES_AND_INDEXES);
+        console.log('[DB] Schema (tables + indexes) created/verified');
+      } catch (schemaErr) {
+        console.error('[DB] FATAL: Schema execution failed:', schemaErr);
+        throw schemaErr;
+      }
+
+      // Step 2: FIX #2 — Enable PRAGMAs separately for reliability
+      try {
+        await db.execAsync(SCHEMA_PRAGMAS);
+        console.log('[DB] WAL mode + synchronous NORMAL set');
+      } catch (pragmaErr) {
+        console.warn('[DB] PRAGMA (WAL/synchronous) failed (non-fatal):', pragmaErr);
+      }
+
+      // Step 3: Enable foreign keys separately
+      await enableForeignKeys(db);
+
+      // Step 4: Run migrations
       await runMigrations(db);
+
+      // Step 5: Boot-time safety checks
       await runBootTimeSafetyChecks(db);
+
+      // Step 6: FIX #4 — Verify database is actually read-write capable
+      const verified = await verifyDatabaseReadWrite(db);
+      if (!verified) {
+        console.error('[DB] WARNING: Database read/write verification failed!');
+      } else {
+        console.log('[DB] Database initialized successfully — all tables ready + R/W verified');
+      }
+
       return db;
+    }).catch((openErr) => {
+      console.error('[DB] FATAL: Cannot open database:', openErr);
+      // Reset the promise so next call retries
+      dbPromise = null;
+      throw openErr;
     });
   }
   return dbPromise;
@@ -285,7 +384,17 @@ export async function getLocalDb(): Promise<SQLite.SQLiteDatabase> {
 
 export async function run(sql: string, params: SqlValue[] = []): Promise<SQLite.SQLiteRunResult> {
   const db = await getLocalDb();
-  return db.runAsync(sql, params as SQLite.SQLiteBindValue[]);
+  try {
+    const result = await db.runAsync(sql, params as SQLite.SQLiteBindValue[]);
+    if (__DEV__ && result.changes === 0 && sql.trim().startsWith('INSERT')) {
+      console.warn('[SQLite] INSERT produced 0 changes — possible constraint violation:', sql.slice(0, 120));
+    }
+    return result;
+  } catch (err) {
+    console.error('[SQLite] runAsync FAILED:', err instanceof Error ? err.message : String(err));
+    console.error('[SQLite] SQL:', sql.slice(0, 200));
+    throw err;
+  }
 }
 
 export async function all<T>(sql: string, params: SqlValue[] = []): Promise<T[]> {

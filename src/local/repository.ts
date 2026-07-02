@@ -87,38 +87,80 @@ export function normalizeFromSqlite<T extends Record<string, unknown>>(row: T): 
   return next as T;
 }
 
+// ─── FIX #5: Add write verification and better error context ───────────────
 export async function upsertLocal<T extends Record<string, unknown>>(
   table: string,
   row: T,
-  options: { enqueue?: boolean; userId?: string; priority?: SyncPriority } = {},
+  options: { enqueue?: boolean; userId?: string; priority?: SyncPriority; skipVerification?: boolean } = {},
 ): Promise<T & { id: string }> {
   const now = new Date().toISOString();
-  const withDefaults = {
+  const withDefaults: Record<string, unknown> = {
     id: (row.id as string | undefined) ?? createUuid(),
     created_at: row.created_at ?? now,
     updated_at: row.updated_at ?? now,
-    ...row,
   };
+
+  // Spread row AFTER defaults so that explicit values win, but only
+  // copy own (non-undefined) properties to avoid overwriting defaults with undefined.
+  for (const key of Object.keys(row)) {
+    const val = (row as Record<string, unknown>)[key];
+    if (val !== undefined) {
+      withDefaults[key] = val;
+    }
+  }
+
   const normalized = normalizeForSqlite(table, withDefaults);
   const keys = Object.keys(normalized);
   const placeholders = keys.map(() => '?').join(', ');
   const update = keys.filter((key) => key !== 'id').map((key) => `${key} = excluded.${key}`).join(', ');
 
-  await run(
-    `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})
-     ON CONFLICT(id) DO UPDATE SET ${update}`,
-    keys.map((key) => normalized[key] as string | number | boolean | null),
-  );
+  if (keys.length === 0) {
+    console.error(`[repo] upsertLocal ${table}: NO KEYS to insert! Row was:`, Object.keys(withDefaults));
+    throw new Error(`upsertLocal ${table}: normalized row has zero columns — check TABLE_COLUMNS mapping`);
+  }
 
+  const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})
+     ON CONFLICT(id) DO UPDATE SET ${update}`;
+  const params = keys.map((key) => normalized[key] as string | number | boolean | null);
+
+  console.log(`[repo] upsertLocal ${table}: id=${withDefaults.id} keys=${keys.length}`);
+
+  // LOCAL WRITE — this is the critical operation that must succeed
+  try {
+    const result = await run(sql, params);
+    
+    // FIX #5: Verify the write actually persisted
+    if (!options.skipVerification && result.changes === 0) {
+      console.warn(`[repo] upsertLocal ${table}: 0 changes for id=${withDefaults.id} — verifying...`);
+      const existing = await first<{ id: string }>(
+        `SELECT id FROM ${table} WHERE id = ? LIMIT 1`,
+        [withDefaults.id as string]
+      );
+      if (existing) {
+        console.log(`[repo] upsertLocal ${table}: Record exists (likely UPDATE), changes=0 is OK`);
+      } else {
+        console.error(`[repo] upsertLocal ${table}: Record NOT found after INSERT with 0 changes! Data was lost.`);
+      }
+    }
+  } catch (err) {
+    console.error(`[repo] upsertLocal ${table} FAILED:`, err);
+    throw err;
+  }
+
+  // SYNC QUEUE — non-fatal: local data is already saved
   if (options.enqueue !== false) {
-    await enqueueSync({
-      tableName: table,
-      operation: 'upsert',
-      recordId: withDefaults.id as string,
-      payload: withDefaults,
-      userId: options.userId ?? (withDefaults.user_id as string | undefined),
-      priority: options.priority,
-    });
+    try {
+      await enqueueSync({
+        tableName: table,
+        operation: 'upsert',
+        recordId: withDefaults.id as string,
+        payload: withDefaults,
+        userId: options.userId ?? (withDefaults.user_id as string | undefined),
+        priority: options.priority,
+      });
+    } catch (syncErr) {
+      console.error(`[repo] upsertLocal ${table}: sync enqueue FAILED (local save OK):`, syncErr);
+    }
   }
 
   return withDefaults as T & { id: string };
@@ -133,21 +175,32 @@ export async function updateLocal<T extends Record<string, unknown>>(
   const normalized = normalizeForSqlite(table, { ...patch, updated_at: new Date().toISOString() });
   const keys = Object.keys(normalized).filter((key) => key !== 'id');
   if (!keys.length) return;
-  await run(
-    `UPDATE ${table} SET ${keys.map((key) => `${key} = ?`).join(', ')} WHERE id = ?`,
-    [...keys.map((key) => normalized[key] as string | number | boolean | null), id],
-  );
+  const sql = `UPDATE ${table} SET ${keys.map((key) => `${key} = ?`).join(', ')} WHERE id = ?`;
+  const params = [...keys.map((key) => normalized[key] as string | number | boolean | null), id];
+
+  console.log(`[repo] updateLocal ${table} id=${id}: keys=[${keys.join(',')}]`);
+
+  try {
+    await run(sql, params);
+  } catch (err) {
+    console.error(`[repo] updateLocal ${table} id=${id} FAILED:`, err);
+    throw err;
+  }
 
   if (options.enqueue !== false) {
-    const row = await getById<Record<string, unknown>>(table, id);
-    await enqueueSync({
-      tableName: table,
-      operation: 'update',
-      recordId: id,
-      payload: row ?? { id, ...patch },
-      userId: options.userId ?? (row?.user_id as string | undefined),
-      priority: options.priority,
-    });
+    try {
+      const row = await getById<Record<string, unknown>>(table, id);
+      await enqueueSync({
+        tableName: table,
+        operation: 'update',
+        recordId: id,
+        payload: row ?? { id, ...patch },
+        userId: options.userId ?? (row?.user_id as string | undefined),
+        priority: options.priority,
+      });
+    } catch (syncErr) {
+      console.error(`[repo] updateLocal ${table}: sync enqueue FAILED (local save OK):`, syncErr);
+    }
   }
 }
 
@@ -156,25 +209,35 @@ export async function deleteLocal(
   id: string,
   options: { enqueue?: boolean; userId?: string; hard?: boolean; priority?: SyncPriority } = {},
 ): Promise<void> {
-  if (options.hard) {
-    await run(`DELETE FROM ${table} WHERE id = ?`, [id]);
-  } else {
-    await run(`UPDATE ${table} SET deleted_at = ?, updated_at = ? WHERE id = ?`, [
-      new Date().toISOString(),
-      new Date().toISOString(),
-      id,
-    ]);
+  const now = new Date().toISOString();
+  console.log(`[repo] deleteLocal ${table} id=${id} hard=${!!options.hard}`);
+  try {
+    if (options.hard) {
+      await run(`DELETE FROM ${table} WHERE id = ?`, [id]);
+    } else {
+      await run(
+        `UPDATE ${table} SET deleted_at = ?, is_deleted = 1, updated_at = ? WHERE id = ?`,
+        [now, now, id],
+      );
+    }
+  } catch (err) {
+    console.error(`[repo] deleteLocal ${table} id=${id} FAILED:`, err);
+    throw err;
   }
 
   if (options.enqueue !== false) {
-    await enqueueSync({
-      tableName: table,
-      operation: 'delete',
-      recordId: id,
-      payload: { id },
-      userId: options.userId,
-      priority: options.priority,
-    });
+    try {
+      await enqueueSync({
+        tableName: table,
+        operation: 'delete',
+        recordId: id,
+        payload: { id },
+        userId: options.userId,
+        priority: options.priority,
+      });
+    } catch (syncErr) {
+      console.error(`[repo] deleteLocal ${table}: sync enqueue FAILED (local delete OK):`, syncErr);
+    }
   }
 }
 
