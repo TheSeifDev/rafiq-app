@@ -1,19 +1,4 @@
-/**
- * EmergencyScreen — Full Emergency Dashboard
- *
- * Standalone tab screen containing:
- * - SOS call button (997)
- * - Emergency contacts (from patient profile)
- * - Quick call grid (Ambulance · Police · Fire · Health)
- * - Active alerts / recent emergency notifications
- * - Gas / Fall detection status
- * - Emergency protocol status (profile completeness)
- * - Share location
- * - First Aid Guide
- *
- * Supports dark/light theme, RTL/LTR, and Expo Go.
- */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Linking,
@@ -38,174 +23,79 @@ import { patientService } from "../services/patient.service";
 import { notificationService } from "../services/notification.service";
 import { checkProfileCompleteness } from "../services/profileCompletionChecker";
 import { spacing, radius } from "../theme";
-
-// ─── Constants ───────────────────────────────────────────────
+import { translations, type AppLanguage } from "../constants/translations";
 
 const BOTTOM_SAFE_SPACING = 110;
 
-// ─── Translations ─────────────────────────────────────────────
-
-const T = {
-  ar: {
-    title: "مركز الطوارئ",
-    subtitle: "وصول سريع · استجابة فورية",
-    sos: "طوارئ SOS",
-    sosDesc: "اضغط للاتصال بالإسعاف فوراً",
-    shareLocation: "مشاركة موقعي",
-    ambulance: "إسعاف",
-    police: "شرطة",
-    fire: "دفاع مدني",
-    health: "الاستشارات",
-    call: "اتصال",
-    contacts: "جهات الاتصال الطارئة",
-    noContacts: "لم تُضَف جهات اتصال طوارئ بعد",
-    addContacts: "أضف جهات اتصال",
-    activeAlerts: "التنبيهات النشطة",
-    noAlerts: "لا توجد تنبيهات نشطة",
-    gasStatus: "حالة كشف الغاز",
-    gasNormal: "لا توجد تسربات مكتشفة",
-    fallStatus: "حالة كشف السقوط",
-    fallNormal: "لا توجد حوادث سقوط",
-    protocolStatus: "حالة بروتوكول الطوارئ",
-    profileComplete: "ملفك الطبي مكتمل",
-    profileIncomplete: "ملفك الطبي غير مكتمل",
-    profileIncompleteDesc: "أكمل ملفك لتفعيل الحماية الكاملة",
-    completeNow: "أكمل الآن",
-    firstAidTitle: "دليل الإسعافات الأولية",
-    firstAidSubtitle: "خطوات طوارئ سريعة",
-    steps: "الخطوات",
-    cpr: "الإنعاش القلبي",
-    cprStep1: "تأكد من الاستجابة",
-    cprStep2: "اتصل 997",
-    cprStep3: "اضغط 100-120/دقيقة",
-    bleeding: "النزيف",
-    bleedingStep1: "اضغط بقوة",
-    bleedingStep2: "قماش نظيف",
-    bleedingStep3: "ارفع العضو",
-    faint: "الإغماء",
-    faintStep1: "مستلقي على الظهر",
-    faintStep2: "ارفع الساقين",
-    faintStep3: "هواء نقي",
-    burn: "الحروق",
-    burnStep1: "برد بالماء الجاري",
-    burnStep2: "10–20 دقيقة",
-    burnStep3: "غطّ بشكل فضفاض",
-  },
-  en: {
-    title: "Emergency Center",
-    subtitle: "Quick access · Instant response",
-    sos: "SOS Emergency",
-    sosDesc: "Tap to call Ambulance immediately",
-    shareLocation: "Share My Location",
-    ambulance: "Ambulance",
-    police: "Police",
-    fire: "Fire Dept",
-    health: "Health Line",
-    call: "Call",
-    contacts: "Emergency Contacts",
-    noContacts: "No emergency contacts added yet",
-    addContacts: "Add contacts",
-    activeAlerts: "Active Alerts",
-    noAlerts: "No active alerts",
-    gasStatus: "Gas Detection Status",
-    gasNormal: "No gas leaks detected",
-    fallStatus: "Fall Detection Status",
-    fallNormal: "No fall incidents detected",
-    protocolStatus: "Emergency Protocol Status",
-    profileComplete: "Medical profile is complete",
-    profileIncomplete: "Medical profile incomplete",
-    profileIncompleteDesc: "Complete your profile to enable full protection",
-    completeNow: "Complete Now",
-    firstAidTitle: "First Aid Guide",
-    firstAidSubtitle: "Step-by-step emergency instructions",
-    steps: "Steps",
-    cpr: "CPR",
-    cprStep1: "Check responsiveness",
-    cprStep2: "Call 997",
-    cprStep3: "Push 100-120/min",
-    bleeding: "Bleeding",
-    bleedingStep1: "Apply firm pressure",
-    bleedingStep2: "Use clean cloth",
-    bleedingStep3: "Elevate the limb",
-    faint: "Fainting",
-    faintStep1: "Lay flat on back",
-    faintStep2: "Elevate legs",
-    faintStep3: "Fresh air",
-    burn: "Burns",
-    burnStep1: "Cool under running water",
-    burnStep2: "10–20 minutes",
-    burnStep3: "Cover loosely",
-  },
-} as const;
-
-type Lang = "ar" | "en";
-
-// ─── Egyptian Emergency Numbers ─────────────────────────────
+type EmergencyCategory = "general" | "medical" | "helpline" | "utility";
 
 interface EmergencyNumber {
   number: string;
-  name: string;
-  category: 'general' | 'medical' | 'helpline' | 'utility';
+  nameKey: keyof typeof translations.en;
+  category: EmergencyCategory;
   icon: string;
   color: string;
 }
 
 const EGYPTIAN_EMERGENCY_NUMBERS: EmergencyNumber[] = [
-  // الطوارئ العامة
-  { number: '112', name: 'الطوارئ العامة', category: 'general', icon: 'alert-circle', color: '#ef4444' },
-  { number: '123', name: 'الشرطة', category: 'general', icon: 'shield-checkmark', color: '#eab308' },
-  // الخدمات الطبية
-  { number: '125', name: 'الإسعاف', category: 'medical', icon: 'medkit', color: '#ef4444' },
-  { number: '126', name: 'المطافئ', category: 'medical', icon: 'flame', color: '#f97316' },
-  { number: '153', name: 'المرور', category: 'medical', icon: 'car', color: '#3b82f6' },
-  { number: '920033333', name: 'الخط الصحي', category: 'medical', icon: 'call', color: '#06b6d4' },
-  { number: '37717173', name: 'مركز السموم', category: 'medical', icon: 'flask', color: '#dc2626' },
-  { number: '23624543', name: 'إسعاف القاهرة', category: 'medical', icon: 'medkit', color: '#ef4444' },
-  { number: '27928585', name: 'إسعاف الجيزة', category: 'medical', icon: 'medkit', color: '#ef4444' },
-  { number: '25240054', name: 'إسعاف حلوان', category: 'medical', icon: 'medkit', color: '#ef4444' },
-  // خطوط المساعدة
-  { number: '16000', name: 'المجلس الطبي', category: 'helpline', icon: 'people', color: '#8b5cf6' },
-  { number: '15555', name: 'صيدلية', category: 'helpline', icon: 'medical', color: '#10b981' },
-  { number: '15000', name: 'مكافحة الإدمان', category: 'helpline', icon: 'heart', color: '#6366f1' },
-  { number: '109', name: 'نجدة الطفولة', category: 'helpline', icon: 'happy', color: '#f472b6' },
-  { number: '15200', name: 'نجدة المرأة', category: 'helpline', icon: 'person', color: '#ec4899' },
-  { number: '28007777', name: 'التأمين الصحي', category: 'helpline', icon: 'shield', color: '#14b8a6' },
-  // المرافق
-  { number: '121', name: 'الغاز', category: 'utility', icon: 'flame', color: '#f97316' },
-  { number: '128', name: 'مياه الشرب', category: 'utility', icon: 'water', color: '#0ea5e9' },
-  { number: '122', name: 'الكهرباء', category: 'utility', icon: 'flash', color: '#eab308' },
-  { number: '129', name: 'الصرف الصحي', category: 'utility', icon: 'trash', color: '#64748b' },
-  { number: '19888', name: 'النظافة', category: 'utility', icon: 'leaf', color: '#78716c' },
+  { number: "112", nameKey: "emgNum_112", category: "general", icon: "alert-circle", color: "#ef4444" },
+  { number: "123", nameKey: "emgNum_123", category: "general", icon: "shield-checkmark", color: "#eab308" },
+  { number: "125", nameKey: "emgNum_125", category: "medical", icon: "medkit", color: "#ef4444" },
+  { number: "126", nameKey: "emgNum_126", category: "medical", icon: "flame", color: "#f97316" },
+  { number: "153", nameKey: "emgNum_153", category: "medical", icon: "car", color: "#3b82f6" },
+  { number: "920033333", nameKey: "emgNum_920033333", category: "medical", icon: "call", color: "#06b6d4" },
+  { number: "37717173", nameKey: "emgNum_37717173", category: "medical", icon: "flask", color: "#dc2626" },
+  { number: "23624543", nameKey: "emgNum_23624543", category: "medical", icon: "medkit", color: "#ef4444" },
+  { number: "27928585", nameKey: "emgNum_27928585", category: "medical", icon: "medkit", color: "#ef4444" },
+  { number: "25240054", nameKey: "emgNum_25240054", category: "medical", icon: "medkit", color: "#ef4444" },
+  { number: "16000", nameKey: "emgNum_16000", category: "helpline", icon: "people", color: "#8b5cf6" },
+  { number: "15555", nameKey: "emgNum_15555", category: "helpline", icon: "medical", color: "#10b981" },
+  { number: "15000", nameKey: "emgNum_15000", category: "helpline", icon: "heart", color: "#6366f1" },
+  { number: "109", nameKey: "emgNum_109", category: "helpline", icon: "happy", color: "#f472b6" },
+  { number: "15200", nameKey: "emgNum_15200", category: "helpline", icon: "person", color: "#ec4899" },
+  { number: "28007777", nameKey: "emgNum_28007777", category: "helpline", icon: "shield", color: "#14b8a6" },
+  { number: "121", nameKey: "emgNum_121", category: "utility", icon: "flame", color: "#f97316" },
+  { number: "128", nameKey: "emgNum_128", category: "utility", icon: "water", color: "#0ea5e9" },
+  { number: "122", nameKey: "emgNum_122", category: "utility", icon: "flash", color: "#eab308" },
+  { number: "129", nameKey: "emgNum_129", category: "utility", icon: "trash", color: "#64748b" },
+  { number: "19888", nameKey: "emgNum_19888", category: "utility", icon: "leaf", color: "#78716c" },
 ];
 
-const CATEGORY_LABELS: Record<EmergencyNumber['category'], string> = {
-  general: 'الطوارئ العامة',
-  medical: 'الخدمات الطبية',
-  helpline: 'خطوط المساعدة',
-  utility: 'المرافق',
+const CATEGORY_KEYS: Record<EmergencyCategory, keyof typeof translations.en> = {
+  general: "catGeneral",
+  medical: "catMedical",
+  helpline: "catHelpline",
+  utility: "catUtility",
 };
 
-const CATEGORY_COLORS: Record<EmergencyNumber['category'], string> = {
-  general: '#ef4444',
-  medical: '#f97316',
-  helpline: '#8b5cf6',
-  utility: '#0ea5e9',
+const CATEGORY_COLORS: Record<EmergencyCategory, string> = {
+  general: "#ef4444",
+  medical: "#f97316",
+  helpline: "#8b5cf6",
+  utility: "#0ea5e9",
 };
 
-const QUICK_CALLS_TOP = [
-  { number: '997', name: 'إسعاف', icon: 'medkit', color: '#FF3B3B' },
-  { number: '123', name: 'شرطة', icon: 'shield-checkmark', color: '#F59E0B' },
-  { number: '121', name: 'غاز', icon: 'flame', color: '#FF6B6B' },
-  { number: '920033333', name: 'خط صحي', icon: 'call', color: '#00C2FF' },
-];
+const CATEGORY_ORDER: EmergencyCategory[] = ["general", "medical", "helpline", "utility"];
 
-// ─── First Aid Data ───────────────────────────────────────────
-
-interface FirstAidCard {
-  titleKey: keyof (typeof T)["en"];
+interface QuickCallItem {
+  number: string;
+  nameKey: keyof typeof translations.en;
   icon: string;
   color: string;
-  steps: [keyof (typeof T)["en"], keyof (typeof T)["en"], keyof (typeof T)["en"]];
+}
+
+const QUICK_CALLS_TOP: QuickCallItem[] = [
+  { number: "125", nameKey: "quickCallAmbulance", icon: "medkit", color: "#FF3B3B" },
+  { number: "123", nameKey: "quickCallPolice", icon: "shield-checkmark", color: "#F59E0B" },
+  { number: "126", nameKey: "quickCallFireDept", icon: "flame", color: "#FF6B6B" },
+  { number: "920033333", nameKey: "quickCallHealthLine", icon: "call", color: "#00C2FF" },
+];
+
+interface FirstAidCard {
+  titleKey: keyof typeof translations.en;
+  icon: string;
+  color: string;
+  steps: [keyof typeof translations.en, keyof typeof translations.en, keyof typeof translations.en];
 }
 
 const FIRST_AID_CARDS: FirstAidCard[] = [
@@ -214,8 +104,6 @@ const FIRST_AID_CARDS: FirstAidCard[] = [
   { titleKey: "faint", icon: "person", color: "#A78BFA", steps: ["faintStep1", "faintStep2", "faintStep3"] },
   { titleKey: "burn", icon: "flame", color: "#F59E0B", steps: ["burnStep1", "burnStep2", "burnStep3"] },
 ];
-
-// ─── Sub-components ───────────────────────────────────────────
 
 function SectionHeader({ title, icon, iconColor, colors }: {
   title: string; icon: string; iconColor: string; colors: any;
@@ -250,15 +138,13 @@ function StatusCard({ icon, iconColor, label, sublabel, isOk, colors }: {
   );
 }
 
-// ─── Main Screen ─────────────────────────────────────────────
-
 export function EmergencyScreen(): React.JSX.Element {
   const { colors, darkMode } = useTheme();
   const language = useAppStore((s) => s.language);
   const session = useAuthStore((s) => s.session);
   const isAr = language === "ar";
-  const lang: Lang = isAr ? "ar" : "en";
-  const t = T[lang];
+  const lang: AppLanguage = isAr ? "ar" : "en";
+  const t = translations[lang];
   const insets = useSafeAreaInsets();
 
   let tabH = 0;
@@ -281,13 +167,11 @@ export function EmergencyScreen(): React.JSX.Element {
         ]);
         setEmergencyContacts(contacts ?? []);
 
-        // Show last 3 emergency-type notifications
         const emergencyNotifs = notifications
           .filter((n: any) => n.category === "emergency" || n.severity === "critical")
           .slice(0, 3);
         setRecentAlerts(emergencyNotifs);
 
-        // Profile completeness
         const result = checkProfileCompleteness(
           { profile, emergencyContacts: contacts ?? [] },
           lang,
@@ -295,7 +179,6 @@ export function EmergencyScreen(): React.JSX.Element {
         setProfileComplete(result.isComplete);
       }
     } catch {
-      // silent fail
     }
   }, [session?.user.id, lang]);
 
@@ -314,30 +197,31 @@ export function EmergencyScreen(): React.JSX.Element {
 
   const handleShare = useCallback(async () => {
     try {
-      // Request location permission
-      const Location = require('expo-location');
+      const Location = require("expo-location");
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('خطأ', 'يرجى السماح بالوصول إلى الموقع من الإعدادات');
+      if (status !== "granted") {
+        Alert.alert(t.validationError, t.locationDenied);
         return;
       }
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const { latitude, longitude } = loc.coords;
       const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
       await Share.share({
-        message: `🚨 موقعي الحالي للطوارئ\n\n📍 ${mapsUrl}`,
+        message: isAr
+          ? `🚨 موقعي الحالي للطوارئ\n\n📍 ${mapsUrl}`
+          : `🚨 My Emergency Location\n\n📍 ${mapsUrl}`,
         url: mapsUrl,
       });
-    } catch (err) {
-      // Fallback to generic share if location fails
+    } catch {
       try {
         await Share.share({
-          message: isAr ? 'أحتاج مساعدة طبية عاجلة!' : 'I need urgent medical help!',
+          message: isAr ? "أحتاج مساعدة طبية عاجلة!" : "I need urgent medical help!",
         });
-      } catch { /* ignore */ }
-      Alert.alert('تنبيه', 'تعذر تحديد الموقع، تأكد من تفعيل GPS');
+      } catch {
+      }
+      Alert.alert(t.cancel, t.locationFailed);
     }
-  }, [isAr]);
+  }, [isAr, t]);
 
   const cardBg = darkMode ? "rgba(26,35,50,0.85)" : colors.surface;
 
@@ -350,30 +234,30 @@ export function EmergencyScreen(): React.JSX.Element {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.danger} />
         }
       >
-        {/* ── Header ── */}
+        {}
         <View style={styles.header}>
           <View style={[styles.headerIconWrap, { backgroundColor: colors.danger + "14" }]}>
             <Ionicons name="shield-checkmark" size={26} color={colors.danger} />
           </View>
           <View style={styles.headerText}>
-            <AppText style={[styles.headerTitle, { color: colors.textPrimary }]}>{t.title}</AppText>
-            <AppText style={[styles.headerSub, { color: colors.textSecondary }]}>{t.subtitle}</AppText>
+            <AppText style={[styles.headerTitle, { color: colors.textPrimary }]}>
+              {t.emergencyCenterTitle}
+            </AppText>
+            <AppText style={[styles.headerSub, { color: colors.textSecondary }]}>
+              {t.emergencyCenterSubtitle}
+            </AppText>
           </View>
         </View>
 
-        {/* ── SOS Button ── */}
-        <TouchableOpacity
-          activeOpacity={0.88}
-          onPress={() => handleCall("997")}
-          style={styles.sosBtn}
-        >
+        {}
+        <TouchableOpacity activeOpacity={0.88} onPress={() => handleCall("997")} style={styles.sosBtn}>
           <View style={styles.sosInner}>
             <View style={styles.sosIconWrap}>
               <Ionicons name="alert-circle" size={38} color="#fff" />
             </View>
             <View style={styles.sosTextWrap}>
-              <AppText style={styles.sosTitle}>{t.sos}</AppText>
-              <AppText style={styles.sosDesc}>{t.sosDesc}</AppText>
+              <AppText style={styles.sosTitle}>{t.sosEmergency}</AppText>
+              <AppText style={styles.sosDesc}>{t.sosEmergencyDesc}</AppText>
             </View>
             <View style={styles.sosChevron}>
               <Ionicons
@@ -385,17 +269,17 @@ export function EmergencyScreen(): React.JSX.Element {
           </View>
         </TouchableOpacity>
 
-        {/* ── Share Location ── */}
+        {}
         <TouchableOpacity
           onPress={handleShare}
           activeOpacity={0.75}
           style={[styles.shareBtn, { borderColor: colors.primary + "30", backgroundColor: colors.primary + "08" }]}
         >
           <Ionicons name="location-sharp" size={16} color={colors.primary} />
-          <AppText style={[styles.shareText, { color: colors.primary }]}>{t.shareLocation}</AppText>
+          <AppText style={[styles.shareText, { color: colors.primary }]}>{t.shareMyLocation}</AppText>
         </TouchableOpacity>
 
-        {/* ── Quick Call Grid (top 4) ── */}
+        {}
         <View style={styles.grid}>
           {QUICK_CALLS_TOP.map((item) => (
             <TouchableOpacity
@@ -408,7 +292,9 @@ export function EmergencyScreen(): React.JSX.Element {
                 <Ionicons name={item.icon as any} size={22} color={item.color} />
               </View>
               <AppText style={[styles.gridNumber, { color: item.color }]}>{item.number}</AppText>
-              <AppText style={[styles.gridLabel, { color: colors.textPrimary }]}>{item.name}</AppText>
+              <AppText style={[styles.gridLabel, { color: colors.textPrimary }]}>
+                {t[item.nameKey] as string}
+              </AppText>
               <View style={[styles.callPill, { backgroundColor: item.color + "14" }]}>
                 <Ionicons name="call" size={11} color={item.color} />
                 <AppText style={[styles.callPillText, { color: item.color }]}>{t.call}</AppText>
@@ -417,14 +303,14 @@ export function EmergencyScreen(): React.JSX.Element {
           ))}
         </View>
 
-        {/* ── All Egyptian Emergency Numbers (grouped) ── */}
-        {(['general', 'medical', 'helpline', 'utility'] as const).map((cat) => {
-          const items = EGYPTIAN_EMERGENCY_NUMBERS.filter(n => n.category === cat);
+        {}
+        {CATEGORY_ORDER.map((cat) => {
+          const items = EGYPTIAN_EMERGENCY_NUMBERS.filter((n) => n.category === cat);
           return (
             <View key={cat}>
-              <View style={[styles.categoryHeader, { backgroundColor: CATEGORY_COLORS[cat] + '14' }]}>
+              <View style={[styles.categoryHeader, { backgroundColor: CATEGORY_COLORS[cat] + "14" }]}>
                 <AppText style={[styles.categoryLabel, { color: CATEGORY_COLORS[cat] }]}>
-                  {CATEGORY_LABELS[cat]}
+                  {t[CATEGORY_KEYS[cat]] as string}
                 </AppText>
               </View>
               <View style={[styles.card, { backgroundColor: cardBg, borderColor: colors.border }]}>
@@ -438,14 +324,18 @@ export function EmergencyScreen(): React.JSX.Element {
                       idx < items.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border },
                     ]}
                   >
-                    <View style={[styles.emergencyIcon, { backgroundColor: item.color + '14' }]}>
+                    <View style={[styles.emergencyIcon, { backgroundColor: item.color + "14" }]}>
                       <Ionicons name={item.icon as any} size={18} color={item.color} />
                     </View>
                     <View style={styles.emergencyInfo}>
-                      <AppText style={[styles.emergencyName, { color: colors.textPrimary }]}>{item.name}</AppText>
-                      <AppText style={[styles.emergencyNumber, { color: item.color }]}>{item.number}</AppText>
+                      <AppText style={[styles.emergencyName, { color: colors.textPrimary }]}>
+                        {t[item.nameKey] as string}
+                      </AppText>
+                      <AppText style={[styles.emergencyNumber, { color: item.color }]}>
+                        {item.number}
+                      </AppText>
                     </View>
-                    <View style={[styles.callCircle, { backgroundColor: item.color + '14' }]}>
+                    <View style={[styles.callCircle, { backgroundColor: item.color + "14" }]}>
                       <Ionicons name="call" size={16} color={item.color} />
                     </View>
                   </TouchableOpacity>
@@ -455,13 +345,13 @@ export function EmergencyScreen(): React.JSX.Element {
           );
         })}
 
-        {/* ── Emergency Contacts ── */}
-        <SectionHeader title={t.contacts} icon="people" iconColor={colors.primary} colors={colors} />
+        {}
+        <SectionHeader title={t.emergencyContacts} icon="people" iconColor={colors.primary} colors={colors} />
         <View style={[styles.card, { backgroundColor: cardBg, borderColor: colors.border }]}>
           {emergencyContacts.length === 0 ? (
             <View style={styles.emptyRow}>
               <Ionicons name="person-add-outline" size={22} color={colors.textSecondary + "60"} />
-              <AppText style={[styles.emptyText, { color: colors.textSecondary }]}>{t.noContacts}</AppText>
+              <AppText style={[styles.emptyText, { color: colors.textSecondary }]}>{t.noEmergencyContacts}</AppText>
             </View>
           ) : (
             emergencyContacts.map((contact: any, idx: number) => (
@@ -480,7 +370,9 @@ export function EmergencyScreen(): React.JSX.Element {
                   </AppText>
                 </View>
                 <View style={styles.contactInfo}>
-                  <AppText style={[styles.contactName, { color: colors.textPrimary }]}>{contact.name ?? "—"}</AppText>
+                  <AppText style={[styles.contactName, { color: colors.textPrimary }]}>
+                    {contact.name ?? "—"}
+                  </AppText>
                   <AppText style={[styles.contactRelation, { color: colors.textSecondary }]}>
                     {contact.relationship ?? contact.relation ?? "—"}
                     {contact.phone ? ` · ${contact.phone}` : ""}
@@ -496,13 +388,13 @@ export function EmergencyScreen(): React.JSX.Element {
           )}
         </View>
 
-        {/* ── Active Alerts ── */}
+        {}
         <SectionHeader title={t.activeAlerts} icon="notifications" iconColor={colors.danger} colors={colors} />
         <View style={[styles.card, { backgroundColor: cardBg, borderColor: colors.border }]}>
           {recentAlerts.length === 0 ? (
             <View style={styles.emptyRow}>
               <Ionicons name="checkmark-circle-outline" size={22} color={colors.success + "80"} />
-              <AppText style={[styles.emptyText, { color: colors.textSecondary }]}>{t.noAlerts}</AppText>
+              <AppText style={[styles.emptyText, { color: colors.textSecondary }]}>{t.noActiveAlerts}</AppText>
             </View>
           ) : (
             recentAlerts.map((alert: any, idx: number) => (
@@ -516,42 +408,45 @@ export function EmergencyScreen(): React.JSX.Element {
                 <View style={[styles.alertDot, { backgroundColor: colors.danger }]} />
                 <View style={styles.alertText}>
                   <AppText style={[styles.alertTitle, { color: colors.textPrimary }]}>{alert.title}</AppText>
-                  <AppText style={[styles.alertBody, { color: colors.textSecondary }]} numberOfLines={2}>{alert.body}</AppText>
+                  <AppText style={[styles.alertBody, { color: colors.textSecondary }]} numberOfLines={2}>
+                    {alert.body}
+                  </AppText>
                 </View>
               </View>
             ))
           )}
         </View>
 
-        {/* ── Device Status ── */}
-        <SectionHeader title={t.gasStatus} icon="flame" iconColor="#F59E0B" colors={colors} />
+        {}
+        <SectionHeader title={t.gasDetectionStatus} icon="flame" iconColor="#F59E0B" colors={colors} />
         <StatusCard
           icon="flame-outline"
           iconColor="#F59E0B"
-          label={t.gasStatus}
-          sublabel={t.gasNormal}
+          label={t.gasDetectionStatus}
+          sublabel={t.noGasLeaks}
           isOk
           colors={colors}
         />
 
-        <SectionHeader title={t.fallStatus} icon="body" iconColor={colors.primary} colors={colors} />
+        {}
+        <SectionHeader title={t.fallDetectionStatus} icon="body" iconColor={colors.primary} colors={colors} />
         <StatusCard
           icon="body-outline"
           iconColor={colors.primary}
-          label={t.fallStatus}
-          sublabel={t.fallNormal}
+          label={t.fallDetectionStatus}
+          sublabel={t.noFallIncidents}
           isOk
           colors={colors}
         />
 
-        {/* ── Profile / Protocol Status ── */}
-        <SectionHeader title={t.protocolStatus} icon="shield-checkmark" iconColor={colors.success} colors={colors} />
+        {}
+        <SectionHeader title={t.emergencyProtocolStatus} icon="shield-checkmark" iconColor={colors.success} colors={colors} />
         {profileComplete === null ? null : profileComplete ? (
           <StatusCard
             icon="checkmark-circle"
             iconColor={colors.success}
-            label={t.protocolStatus}
-            sublabel={t.profileComplete}
+            label={t.emergencyProtocolStatus}
+            sublabel={t.medicalProfileComplete}
             isOk
             colors={colors}
           />
@@ -561,14 +456,16 @@ export function EmergencyScreen(): React.JSX.Element {
               <Ionicons name="warning-outline" size={22} color={colors.danger} />
             </View>
             <View style={styles.protocolText}>
-              <AppText style={[styles.protocolLabel, { color: colors.danger }]}>{t.profileIncomplete}</AppText>
-              <AppText style={[styles.protocolSub, { color: colors.textSecondary }]}>{t.profileIncompleteDesc}</AppText>
+              <AppText style={[styles.protocolLabel, { color: colors.danger }]}>{t.medicalProfileIncomplete}</AppText>
+              <AppText style={[styles.protocolSub, { color: colors.textSecondary }]}>
+                {t.completeProfileForProtection}
+              </AppText>
             </View>
           </View>
         )}
 
-        {/* ── First Aid Guide ── */}
-        <SectionHeader title={t.firstAidTitle} icon="medical" iconColor={colors.success} colors={colors} />
+        {}
+        <SectionHeader title={t.firstAidGuide} icon="medical" iconColor={colors.success} colors={colors} />
         <View style={styles.firstAidList}>
           {FIRST_AID_CARDS.map((item) => (
             <View
@@ -579,7 +476,9 @@ export function EmergencyScreen(): React.JSX.Element {
                 <View style={[styles.firstAidIcon, { backgroundColor: item.color + "14" }]}>
                   <Ionicons name={item.icon as any} size={18} color={item.color} />
                 </View>
-                <AppText style={[styles.firstAidTitle, { color: item.color }]}>{t[item.titleKey]}</AppText>
+                <AppText style={[styles.firstAidTitle, { color: item.color }]}>
+                  {t[item.titleKey] as string}
+                </AppText>
               </View>
               <View style={[styles.stepsDivider, { borderTopColor: colors.border }]}>
                 <AppText style={[styles.stepsLabel, { color: colors.textSecondary }]}>{t.steps}</AppText>
@@ -589,7 +488,9 @@ export function EmergencyScreen(): React.JSX.Element {
                       <View style={[styles.stepBadge, { backgroundColor: item.color + "18" }]}>
                         <AppText style={[styles.stepNum, { color: item.color }]}>{i + 1}</AppText>
                       </View>
-                      <AppText style={[styles.stepText, { color: colors.textPrimary }]}>{t[stepKey]}</AppText>
+                      <AppText style={[styles.stepText, { color: colors.textPrimary }]}>
+                        {t[stepKey] as string}
+                      </AppText>
                     </View>
                   ))}
                 </View>
@@ -602,16 +503,12 @@ export function EmergencyScreen(): React.JSX.Element {
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     gap: spacing.md,
   },
-
-  // Header
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -629,7 +526,6 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 24, fontWeight: "900", letterSpacing: -0.4 },
   headerSub: { fontSize: 13, fontWeight: "500" },
 
-  // SOS
   sosBtn: {
     backgroundColor: "#FF3B3B",
     borderRadius: radius.xl,
@@ -661,7 +557,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  // Share
   shareBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -673,7 +568,6 @@ const styles = StyleSheet.create({
   },
   shareText: { fontSize: 13, fontWeight: "700" },
 
-  // Quick Call Grid
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -708,17 +602,17 @@ const styles = StyleSheet.create({
   },
   callPillText: { fontSize: 12, fontWeight: "800" },
 
-  // Emergency number row
   categoryHeader: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 10,
     marginBottom: 4,
   },
-  categoryLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+  categoryLabel: { fontSize: 12, fontWeight: "800", letterSpacing: 0.5 },
+
   emergencyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     padding: 14,
     gap: 12,
   },
@@ -726,14 +620,13 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   emergencyInfo: { flex: 1, gap: 2 },
-  emergencyName: { fontSize: 14, fontWeight: '700' },
-  emergencyNumber: { fontSize: 12, fontWeight: '600' },
+  emergencyName: { fontSize: 14, fontWeight: "700" },
+  emergencyNumber: { fontSize: 12, fontWeight: "600" },
 
-  // Section header
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -749,14 +642,12 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 15, fontWeight: "700" },
 
-  // Generic card
   card: {
     borderRadius: radius.lg,
     borderWidth: 1,
     overflow: "hidden",
   },
 
-  // Empty rows
   emptyRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -766,7 +657,6 @@ const styles = StyleSheet.create({
   },
   emptyText: { fontSize: 13, fontWeight: "500" },
 
-  // Contacts
   contactRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -792,7 +682,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  // Alerts
   alertRow: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -804,7 +693,6 @@ const styles = StyleSheet.create({
   alertTitle: { fontSize: 14, fontWeight: "600" },
   alertBody: { fontSize: 12, fontWeight: "500", lineHeight: 18 },
 
-  // Status card
   statusCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -825,7 +713,6 @@ const styles = StyleSheet.create({
   statusSub: { fontSize: 12, fontWeight: "500" },
   statusDot: { width: 10, height: 10, borderRadius: 5 },
 
-  // Protocol incomplete
   protocolIncomplete: {
     flexDirection: "row",
     alignItems: "center",
@@ -845,7 +732,6 @@ const styles = StyleSheet.create({
   protocolLabel: { fontSize: 14, fontWeight: "700" },
   protocolSub: { fontSize: 12, fontWeight: "500" },
 
-  // First Aid
   firstAidList: { gap: spacing.sm },
   firstAidCard: {
     borderRadius: radius.lg,

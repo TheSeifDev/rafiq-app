@@ -1,4 +1,4 @@
-export const RAFIQ_SQLITE_SCHEMA_VERSION = 6;
+export const RAFIQ_SQLITE_SCHEMA_VERSION = 7;
 
 export const RAFIQ_SQLITE_SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS patient_conditions (
   updated_by_device TEXT,
   deleted_by TEXT,
   deleted_at TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -95,6 +96,7 @@ CREATE TABLE IF NOT EXISTS emergency_contacts (
   updated_by_device TEXT,
   deleted_by TEXT,
   deleted_at TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -230,6 +232,9 @@ CREATE TABLE IF NOT EXISTS medications (
   doctor_name TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   is_active INTEGER NOT NULL DEFAULT 1,
+  is_deleted INTEGER NOT NULL DEFAULT 0,
+  updated_by_device TEXT,
+  deleted_by TEXT,
   version INTEGER NOT NULL DEFAULT 1,
   deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -699,5 +704,4 @@ CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation_time ON ai_messages(conv
 CREATE INDEX IF NOT EXISTS idx_pending_sync_ready ON pending_sync(status, next_attempt_at, priority);
 CREATE INDEX IF NOT EXISTS idx_realtime_events_user_time ON realtime_events(user_id, created_at DESC);
 
-INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (${RAFIQ_SQLITE_SCHEMA_VERSION}, 'unified-offline-schema');
-`;
+INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (${RAFIQ_SQLITE_SCHEMA_VERSION}, 'unified-offline-schema');`;

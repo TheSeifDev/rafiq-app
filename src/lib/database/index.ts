@@ -1,17 +1,5 @@
-/**
- * SQLite Database Manager
- * Initializes expo-sqlite with proper PRAGMAs and schema loading
- */
-import * as SQLite from 'expo-sqlite';
-import { loadSchemaSQL } from './schema';
+import { getLocalDb } from '../../local/db';
 
-let db: SQLite.SQLiteDatabase | null = null;
-
-/**
- * Convert values to expo-sqlite compatible bindings.
- * undefined → null, booleans → 1/0, objects → JSON string.
- * All other primitives pass through unchanged.
- */
 export function sanitizeBindings(params: unknown[]): (string | number | null)[] {
   return params.map(p => {
     if (p === undefined) return null;
@@ -24,67 +12,62 @@ export function sanitizeBindings(params: unknown[]): (string | number | null)[] 
   });
 }
 
-export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
-  if (db) return db;
-
-  db = await SQLite.openDatabaseAsync('rafiq_local.db');
-
-  // Centralized PRAGMAs — single source of truth
-  await db.execAsync('PRAGMA journal_mode = WAL;');
-  await db.execAsync('PRAGMA foreign_keys = ON;');
-  await db.execAsync('PRAGMA synchronous = NORMAL;');
-  await db.execAsync('PRAGMA busy_timeout = 30000;');
-  await db.execAsync('PRAGMA wal_autocheckpoint = 1000;');
-
-  // Load schema using Expo-compatible method
-  const schemaSQL = await loadSchemaSQL();
-  await db.execAsync(schemaSQL);
-
-  return db;
+export async function getDatabase() {
+  return getLocalDb();
 }
 
-/**
- * Execute a parameterized SELECT query.
- * Returns array of typed results.
- */
 export async function runQuery<T>(
   sql: string,
   params: (string | number | null)[] = []
 ): Promise<T[]> {
-  const database = await getDatabase();
+  const db = await getLocalDb();
   const sanitizedParams = sanitizeBindings(params);
-  const result = await database.getAllAsync<T>(sql, sanitizedParams);
-  return result;
+  try {
+    const result = await db.getAllAsync<T>(sql, sanitizedParams);
+    return result;
+  } catch (err) {
+    throw err;
+  }
 }
 
-/**
- * Execute a statement (INSERT/UPDATE/DELETE).
- * Returns SQLiteRunResult with changes and lastInsertRowid.
- */
 export async function runStatement(
   sql: string,
   params: (string | number | null)[] = []
-): Promise<SQLite.SQLiteRunResult> {
-  const database = await getDatabase();
+): Promise<{ changes: number; lastInsertRowId: number }> {
+  const db = await getLocalDb();
   const sanitizedParams = sanitizeBindings(params);
-  const result = await database.runAsync(sql, sanitizedParams);
-  return result;
-}
+  const MAX_RETRIES = 2;
 
-/**
- * Execute raw SQL without parameters (DDL, PRAGMA, etc.)
- */
-export async function execSQL(sql: string): Promise<void> {
-  const database = await getDatabase();
-  await database.execAsync(sql);
-}
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const result = await db.runAsync(sql, sanitizedParams);
+      return { changes: result.changes, lastInsertRowId: result.lastInsertRowId };
+    } catch (err: unknown) {
+      const isNPE =
+        err instanceof Error &&
+        (err.message.includes('NullPointerException') ||
+         err.message.includes('prepareAsync'));
 
-/**
- * Close database connection
- */
-export async function closeDatabase(): Promise<void> {
-  if (db) {
-    await db.closeAsync();
-    db = null;
+      if (isNPE && attempt < MAX_RETRIES) {
+        const delay = 100 * (attempt + 1);
+        console.warn(
+          `[DB] NullPointerException on runStatement attempt ${attempt + 1}/${MAX_RETRIES + 1}, ` +
+          `retrying in ${delay}ms...`
+        );
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
+    }
   }
+
+  throw new Error('[DB] Unexpected: runStatement exhausted retries without throwing');
+}
+
+export async function execSQL(sql: string): Promise<void> {
+  const db = await getLocalDb();
+  await db.execAsync(sql);
+}
+
+export async function closeDatabase(): Promise<void> {
 }

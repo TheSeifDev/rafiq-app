@@ -26,6 +26,8 @@ function getAPIKey(name: string): string | undefined {
 }
 
 // Environment exports
+// NOTE: openRouterModel already defaults to openai/gpt-4o-mini (no :free suffix).
+//       This is correct — do NOT add ':free' as OpenRouter discontinued free tiers.
 export const env = {
   supabaseUrl: getVar("EXPO_PUBLIC_SUPABASE_URL", true),
   supabaseAnonKey: getVar("EXPO_PUBLIC_SUPABASE_ANON_KEY", true),

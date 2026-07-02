@@ -49,10 +49,10 @@ export interface AIConfig {
 }
 
 const DEFAULT_CONFIG: AIConfig = {
-  model: 'meta-llama/llama-3.1-8b-instruct:free',
+  model: 'openai/gpt-4o-mini',
   maxTokens: 2000,
   temperature: 0.7,
-  reasoningEnabled: false, // Not supported on free-tier models
+  reasoningEnabled: false,
   streamingEnabled: false,
   fallbackEnabled: true,
   maxRetries: 1,

@@ -15,9 +15,6 @@ export function createUuid(): string {
 }
 
 const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) | string> = {
-  // v4 — Migrate non-UUID patient IDs to raw UUID format.
-  //       Old IDs: `pat_<timestamp>_<random>` or `pat_<uuid>` (prefixed).
-  //       Supabase uuid columns reject anything that isn't a bare UUID.
   4: async (db: SQLite.SQLiteDatabase) => {
     const patients = await db.getAllAsync<{ id: string }>(
       "SELECT id FROM patients WHERE id NOT GLOB '*-*-*-*-*'"
@@ -42,21 +39,19 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
 
     for (const patient of patients) {
       const oldId = patient.id;
-      const newId = createRuntimeUuid(); // bare UUID, no prefix
+      const newId = createRuntimeUuid();
       try {
         await db.execAsync('BEGIN TRANSACTION');
 
-        // Update all FK tables first (while old PK still exists)
         for (const table of PATIENT_FK_TABLES) {
           try {
             await db.runAsync(
               `UPDATE ${table} SET patient_id = ? WHERE patient_id = ?`,
               [newId, oldId]
             );
-          } catch { /* Table may not exist yet — safe to skip */ }
+          } catch {  }
         }
 
-        // Update the patient PK itself, store old ID in legacy_id for reference
         await db.runAsync(
           'UPDATE patients SET id = ?, legacy_id = ? WHERE id = ?',
           [newId, oldId, oldId]
@@ -64,7 +59,6 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
 
         await db.execAsync('COMMIT');
 
-        // Patch ALL AsyncStorage keys that might hold the old patient ID
         for (const key of ['@rafiq_patientId', '@rafiq_userId', 'currentPatientId']) {
           try {
             const cached = await AsyncStorage.getItem(key);
@@ -72,18 +66,17 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
               await AsyncStorage.setItem(key, newId);
               console.info(`[Migration v4] Updated AsyncStorage ${key}: ${oldId} → ${newId}`);
             }
-          } catch { /* Non-fatal */ }
+          } catch {  }
         }
 
         console.info(`[Migration v4] Migrated patient ${oldId} → ${newId}`);
       } catch (err) {
-        try { await db.execAsync('ROLLBACK'); } catch { /* ignore */ }
+        try { await db.execAsync('ROLLBACK'); } catch {  }
         console.error(`[Migration v4] Failed to migrate patient ${oldId}:`, err);
       }
     }
   },
 
-  // v5 — Add missing soft-delete columns to patients and emergency_contacts.
   5: async (db: SQLite.SQLiteDatabase) => {
     const alters = [
       `ALTER TABLE patients ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`,
@@ -100,12 +93,26 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
       `ALTER TABLE patient_conditions ADD COLUMN deleted_at TEXT`,
     ];
     for (const sql of alters) {
-      try { await db.execAsync(sql); } catch { /* Column already exists — ignore */ }
+      try { await db.execAsync(sql); } catch {  }
     }
     console.info('[Migration v5] Soft-delete columns ensured.');
   },
 
-  // v6 — Recreate patient_conditions with correct schema (condition_name not condition_key).
+  7: async (db: SQLite.SQLiteDatabase) => {
+    const alters = [
+      `ALTER TABLE patient_conditions ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
+      `ALTER TABLE emergency_contacts ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
+      `ALTER TABLE medications ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
+      `ALTER TABLE medications ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE medications ADD COLUMN updated_by_device TEXT`,
+      `ALTER TABLE medications ADD COLUMN deleted_by TEXT`,
+    ];
+    for (const sql of alters) {
+      try { await db.execAsync(sql); } catch {  }
+    }
+    console.info('[Migration v7] version + soft-delete columns ensured on all BaseRepository tables.');
+  },
+
   6: async (db: SQLite.SQLiteDatabase) => {
     let hasOldSchema = false;
     try {
@@ -148,21 +155,15 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
       await db.execAsync('COMMIT');
       console.info('[Migration v6] Recreated patient_conditions with correct schema.');
     } catch (err) {
-      try { await db.execAsync('ROLLBACK'); } catch { /* ignore */ }
+      try { await db.execAsync('ROLLBACK'); } catch {  }
       console.error('[Migration v6] Failed:', err);
       throw err;
     }
   },
 };
 
-/**
- * Boot-time safety net: runs REGARDLESS of migration version tracking.
- * Catches devices where migrations were recorded as applied but the actual
- * data change didn't happen (e.g. transaction abort, version already marked).
- */
 async function runBootTimeSafetyChecks(db: SQLite.SQLiteDatabase): Promise<void> {
   try {
-    // Safety check: migrate any remaining non-UUID patient IDs
     const oldPatients = await db.getAllAsync<{ id: string }>(
       "SELECT id FROM patients WHERE id NOT GLOB '*-*-*-*-*'"
     );
@@ -179,7 +180,7 @@ async function runBootTimeSafetyChecks(db: SQLite.SQLiteDatabase): Promise<void>
         try {
           await db.execAsync('BEGIN TRANSACTION');
           for (const t of PATIENT_FK_TABLES) {
-            try { await db.runAsync(`UPDATE ${t} SET patient_id = ? WHERE patient_id = ?`, [newId, oldId]); } catch { /* skip */ }
+            try { await db.runAsync(`UPDATE ${t} SET patient_id = ? WHERE patient_id = ?`, [newId, oldId]); } catch {  }
           }
           await db.runAsync('UPDATE patients SET id = ?, legacy_id = ? WHERE id = ?', [newId, oldId, oldId]);
           await db.execAsync('COMMIT');
@@ -188,30 +189,40 @@ async function runBootTimeSafetyChecks(db: SQLite.SQLiteDatabase): Promise<void>
               if ((await AsyncStorage.getItem(key)) === oldId) {
                 await AsyncStorage.setItem(key, newId);
               }
-            } catch { /* non-fatal */ }
+            } catch {  }
           }
           console.info(`[DB Boot] Emergency migration: ${oldId} → ${newId}`);
         } catch (err) {
-          try { await db.execAsync('ROLLBACK'); } catch { /* ignore */ }
+          try { await db.execAsync('ROLLBACK'); } catch {  }
           console.error(`[DB Boot] Emergency migration failed for ${oldId}:`, err);
         }
       }
     }
 
-    // Safety check: ensure soft-delete columns exist (idempotent ALTER TABLE)
     const colsToEnsure: Array<[string, string, string]> = [
       ['patients', 'is_deleted', 'INTEGER NOT NULL DEFAULT 0'],
       ['patients', 'updated_by_device', 'TEXT'],
       ['patients', 'deleted_by', 'TEXT'],
       ['patients', 'deleted_at', 'TEXT'],
       ['patients', 'legacy_id', 'TEXT'],
+      ['patients', 'version', 'INTEGER NOT NULL DEFAULT 1'],
       ['emergency_contacts', 'is_deleted', 'INTEGER NOT NULL DEFAULT 0'],
       ['emergency_contacts', 'updated_by_device', 'TEXT'],
       ['emergency_contacts', 'deleted_by', 'TEXT'],
       ['emergency_contacts', 'deleted_at', 'TEXT'],
+      ['emergency_contacts', 'version', 'INTEGER NOT NULL DEFAULT 1'],
+      ['patient_conditions', 'version', 'INTEGER NOT NULL DEFAULT 1'],
+      ['patient_conditions', 'is_deleted', 'INTEGER NOT NULL DEFAULT 0'],
+      ['patient_conditions', 'updated_by_device', 'TEXT'],
+      ['patient_conditions', 'deleted_by', 'TEXT'],
+      ['patient_conditions', 'deleted_at', 'TEXT'],
+      ['medications', 'version', 'INTEGER NOT NULL DEFAULT 1'],
+      ['medications', 'is_deleted', 'INTEGER NOT NULL DEFAULT 0'],
+      ['medications', 'updated_by_device', 'TEXT'],
+      ['medications', 'deleted_by', 'TEXT'],
     ];
     for (const [table, col, def] of colsToEnsure) {
-      try { await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch { /* exists — ok */ }
+      try { await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch {  }
     }
   } catch (err) {
     console.error('[DB Boot] Safety check error (non-fatal):', err);
@@ -219,7 +230,6 @@ async function runBootTimeSafetyChecks(db: SQLite.SQLiteDatabase): Promise<void>
 }
 
 async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
-  // Ensure schema_migrations table exists
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY,
@@ -248,7 +258,6 @@ async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
           console.info(`[SQLite] Migration v${v} applied`);
         } catch (err) {
           console.error(`[SQLite] Migration v${v} failed:`, err);
-          // Continue with other migrations even if one fails
         }
       }
 
@@ -257,7 +266,7 @@ async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
           `INSERT OR REPLACE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, datetime('now'))`,
           [v, `migration-v${v}`]
         );
-      } catch { /* ignore */ }
+      } catch {  }
     }
   }
 }
@@ -267,7 +276,6 @@ export async function getLocalDb(): Promise<SQLite.SQLiteDatabase> {
     dbPromise = SQLite.openDatabaseAsync(DB_NAME).then(async (db) => {
       await db.execAsync(RAFIQ_SQLITE_SCHEMA);
       await runMigrations(db);
-      // ALWAYS run boot-time safety checks after migrations
       await runBootTimeSafetyChecks(db);
       return db;
     });

@@ -2,16 +2,14 @@ import { AIProvider, AIMessage, HealthContext, StreamingCallback, AIProviderErro
 import { fetchWithRetry, type StreamConfig } from '../streaming';
 import { env } from '../../../config/env';
 
-// Free-tier model that actually exists on OpenRouter.
-// Override via EXPO_PUBLIC_OPENROUTER_MODEL env variable.
-const DEFAULT_MODEL = 'meta-llama/llama-3.1-8b-instruct:free';
+const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 const FETCH_CONFIG: StreamConfig = {
   throttleMs: 16,
   bufferSize: 5,
   timeoutMs: 60000,
-  maxRetries: 1, // Only retry once — 429s are handled separately
+  maxRetries: 1,
   retryDelayMs: 1000,
 };
 
@@ -49,7 +47,6 @@ class OpenRouterProvider implements AIProvider {
       console.warn('[OpenRouter] No API key found in environment');
     }
 
-    // Use env override if available, then constructor arg, then default
     this.model = env.openRouterModel || model || DEFAULT_MODEL;
   }
 
@@ -99,7 +96,7 @@ class OpenRouterProvider implements AIProvider {
 
     const content: string = data?.choices?.[0]?.message?.content ?? '';
     this.markSuccess();
-    return { role: 'assistant', content };
+    return { role: 'assistant' as const, content }
   }
 
   async generateStreaming(
@@ -175,7 +172,6 @@ class OpenRouterProvider implements AIProvider {
           errorBody = '(unreadable)';
         }
         if (response.status === 429) {
-          // Throw AIRateLimitError so the provider manager immediately fails over to Groq
           this.markFailure(`Rate limited (429)`);
           throw new AIRateLimitError(this.id);
         }

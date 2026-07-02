@@ -40,6 +40,28 @@ function Boot(): React.JSX.Element {
       await initNotificationsOnce().catch((e) => console.warn('[Notifications] Init failed:', e));
     };
     setupNotifications();
+
+    // Request required permissions automatically on startup
+    const requestPermissions = async () => {
+      try {
+        // Request notification permission
+        const notifStatus = await Notifications.requestPermissionsAsync();
+        console.log('[Permissions] Notifications:', notifStatus.status);
+
+        // Request location permission (foreground only)
+        try {
+          const Location = require('expo-location');
+          const locStatus = await Location.requestForegroundPermissionsAsync();
+          console.log('[Permissions] Location:', locStatus.status);
+        } catch (locErr) {
+          console.warn('[Permissions] expo-location not available:', locErr);
+        }
+      } catch (err) {
+        console.warn('[Permissions] Failed to request:', err);
+      }
+    };
+    // Delay permission requests slightly to avoid blocking app startup
+    setTimeout(requestPermissions, 2000);
   }, [hydrate, initialize]);
 
   const isRTL = language === 'ar';

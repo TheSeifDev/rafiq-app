@@ -47,19 +47,6 @@
           "icon": "./assets/icon.png",
           "color": "#00C2FF"
         }
-      ],
-      [
-        "react-native-health-connect",
-        {
-          "permissions": [
-            "android.permission.health.READ_HEART_RATE",
-            "android.permission.health.READ_STEPS",
-            "android.permission.health.READ_OXYGEN_SATURATION",
-            "android.permission.health.READ_SLEEP",
-            "android.permission.health.READ_BLOOD_PRESSURE",
-            "android.permission.health.READ_BODY_TEMPERATURE"
-          ]
-        }
       ]
     ],
     "extra": {
