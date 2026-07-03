@@ -46,7 +46,7 @@ export async function runStatement(
       const isNPE =
         err instanceof Error &&
         (err.message.includes('NullPointerException') ||
-         err.message.includes('prepareAsync'));
+          err.message.includes('prepareAsync'));
 
       if (isNPE && attempt < MAX_RETRIES) {
         const delay = 100 * (attempt + 1);

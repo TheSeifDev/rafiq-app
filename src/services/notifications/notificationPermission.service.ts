@@ -109,17 +109,21 @@ class NotificationPermissionService {
 
   /**
    * Configure notification behavior for Android 13+
+   *
+   * FIX: This method previously called `Notifications.setNotificationHandler`
+   * which DUPLICATES the registration in `notificationPipeline.ts`. Since
+   * `setNotificationHandler` overwrites the previous registration, calling
+   * this method would silently REPLACE the pipeline's emergency-aware
+   * foreground handler (which shows emergency alerts even when the app is
+   * foregrounded) with a generic "always show" handler.
+   *
+   * The method is now a no-op — the canonical handler is in
+   * `notificationPipeline.ts:196`. This method is kept only for backward
+   * compatibility with any caller that still imports it.
    */
   async configureNotificationBehavior(): Promise<void> {
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-      }),
-    });
+    // Intentional no-op — see JSDoc above.
+    return;
   }
 }
 

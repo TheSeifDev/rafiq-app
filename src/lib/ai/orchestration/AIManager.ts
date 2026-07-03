@@ -3,7 +3,8 @@ import { AIProvider } from '../providers/types';
 import { AIRateLimitError } from '../providers/types';
 import { env } from '../../../config/env';
 import { MedicalSafetyValidator } from '../safety/MedicalSafetyValidator';
-import { sendChat, type ChatMessage as EdgeChatMessage } from '../../../services/chat.service';
+
+import { generateLocalResponse } from './LocalAIFallback';
 
 import {
   createReasoningState,
@@ -18,7 +19,7 @@ import {
   createTimeoutController,
   type StreamChunk,
   type StreamingConfig,
-} from './StreamingEngine';
+} from '../../../../src/lib/ai/orchestration/StreamingEngine';
 import {
   buildHealthContext,
   formatContextForPrompt,
@@ -26,7 +27,6 @@ import {
   type HealthInsight,
 } from './HealthContextEngine';
 import type { PatientContext } from '../../../services/ai/PatientContextAggregator';
-import generateLocalResponse from './LocalAIFallback';
 
 export interface AIResponse {
   content: string;
@@ -48,10 +48,6 @@ export interface AIConfig {
   fallbackEnabled: boolean;
   maxRetries: number;
   timeoutMs: number;
-}
-
-function isArabic(text: string): boolean {
-  return /[\u0600-\u06FF]/.test(text);
 }
 
 const DEFAULT_CONFIG: AIConfig = {
@@ -132,6 +128,10 @@ class AIManager {
     this.patientContext = pc;
   }
 
+  getExistingHealthContext(): HealthContextData | null {
+    return this.healthContext;
+  }
+
   getReasoningState(): ReasoningState {
     return this.reasoningState;
   }
@@ -146,8 +146,15 @@ class AIManager {
 
   async generate(
     userMessage: string,
-    onChunk?: (chunk: StreamChunk) => void
+    onChunk?: (chunk: StreamChunk) => void,
+    signal?: AbortSignal
   ): Promise<AIResponse> {
+    if (signal?.aborted) {
+      const err = new Error('Aborted');
+      err.name = 'AbortError';
+      throw err;
+    }
+
     if (!this._isInitialized || !this.healthContext) {
       console.warn('[AI Manager] Not initialized — using fallback health context');
       this.initialize(this.healthContext ?? FALLBACK_HEALTH_CONTEXT);
@@ -167,54 +174,36 @@ class AIManager {
 
     let aiResponse: AIResponse;
 
-    const hasDirectProvider = !!(env.openRouterApiKey || env.groqApiKey);
-
-    if (!hasDirectProvider) {
-      console.log('[AI Manager] No direct API keys — using Supabase Edge Function (Gemini)');
-      try {
-        aiResponse = await this.generateWithFallback(userMessage);
-      } catch (fallbackErr) {
-        const errMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-        console.error('[AI Manager] Edge Function failed:', errMsg);
-
-        console.log('[AI Manager] All remote AI failed — using local built-in AI');
-        const localContent = generateLocalResponse(userMessage);
-        aiResponse = {
-          content: localContent.content,
-          provider: localContent.provider,
-          model: localContent.model,
-          finishReason: localContent.finishReason,
-        };
+    try {
+      aiResponse = await this.generateNonStreaming(messages, allInsights, signal);
+    } catch (generationError: unknown) {
+      if (signal?.aborted || (generationError instanceof Error && generationError.name === 'AbortError')) {
+        throw generationError;
       }
-    } else {
-      try {
-        aiResponse = await this.generateNonStreaming(messages, allInsights);
-      } catch (generationError: unknown) {
-        const errMsg = generationError instanceof Error ? generationError.message : String(generationError);
+      const errMsg = generationError instanceof Error ? generationError.message : String(generationError);
 
-        console.error('[AI Manager] Generation error:', {
-          message: errMsg,
-          provider: this.getProvider().name,
-          model: this.config.model,
-        });
+      console.error('[AI Manager] Generation error:', {
+        message: errMsg,
+        provider: this.getProvider().name,
+        model: this.config.model,
+      });
 
-        if (this.config.fallbackEnabled) {
-          console.log('[AI Manager] Attempting fallback provider after primary failure');
-          try {
-            aiResponse = await this.generateWithFallback(userMessage);
-          } catch {
-            console.log('[AI Manager] ALL remote AI failed — using local built-in AI');
-            const localContent = generateLocalResponse(userMessage);
-            aiResponse = {
-              content: localContent.content,
-              provider: localContent.provider,
-              model: localContent.model,
-              finishReason: localContent.finishReason,
-            };
-          }
-        } else {
-          throw generationError;
+      if (this.config.fallbackEnabled) {
+        console.log('[AI Manager] Attempting fallback provider after primary failure');
+        try {
+          aiResponse = await this.generateWithFallback(userMessage);
+        } catch (fallbackErr) {
+          console.warn('[AI Manager] All remote AI failed — using local offline AI:', fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr));
+          const localContent = generateLocalResponse(userMessage);
+          aiResponse = {
+            content: localContent.content,
+            provider: localContent.provider,
+            model: localContent.model,
+            finishReason: localContent.finishReason,
+          };
         }
+      } else {
+        throw generationError;
       }
     }
 
@@ -229,10 +218,17 @@ class AIManager {
     );
 
     if (!validationResult.isSafe) {
+      console.warn('[AI Medical Safety] Unsafe AI response blocked:', {
+        issues: validationResult.issues,
+      });
+
       aiResponse = {
         ...aiResponse,
         content: validationResult.sanitizedResponse,
         requiresEmergencyEscalation: validationResult.requiresEmergencyEscalation,
+        reasoningDetails: aiResponse.reasoningDetails
+          ? `${aiResponse.reasoningDetails}\n[SAFETY_FILTERED: ${validationResult.issues.join('; ')}]`
+          : `[SAFETY_FILTERED: ${validationResult.issues.join('; ')}]`,
       };
     }
 
@@ -253,12 +249,13 @@ class AIManager {
 
   private async generateNonStreaming(
     messages: Array<{ role: string; content: string; reasoning?: string }>,
-    insights: HealthInsight[]
+    insights: HealthInsight[],
+    signal?: AbortSignal
   ): Promise<AIResponse> {
     const provider = this.getProvider();
     const startTime = Date.now();
 
-    const response = await this.makeRequest(provider, messages);
+    const response = await this.makeRequest(provider, messages, signal);
     const { content, reasoning: reasoningDetails, finishReason } = await parseJSONResponse(response);
 
     if (!content && !reasoningDetails) {
@@ -288,23 +285,8 @@ class AIManager {
     };
   }
 
-  private async generateWithFallback(userMessage: string): Promise<AIResponse> {
+  private async generateWithFallback(_userMessage: string): Promise<AIResponse> {
     const ctx = this.healthContext ?? FALLBACK_HEALTH_CONTEXT;
-    const hasDirectProvider = !!(env.openRouterApiKey || env.groqApiKey);
-
-    if (!hasDirectProvider) {
-      return this.generateViaEdgeFunction(userMessage, ctx);
-    }
-
-    try {
-      return await this.generateViaDirectProviders(ctx);
-    } catch {
-      console.warn('[AI Manager] Direct providers failed, falling back to Edge Function');
-      return this.generateViaEdgeFunction(userMessage, ctx);
-    }
-  }
-
-  private async generateViaDirectProviders(ctx: HealthContextData): Promise<AIResponse> {
     const { insights: healthInsights } = buildHealthContext(ctx);
     const patientInsights = this.buildPatientInsights(this.patientContext);
     const allInsights = [...healthInsights, ...patientInsights];
@@ -332,6 +314,30 @@ class AIManager {
         })),
         recentAlerts: alertsToStrings(this.healthContext?.recentAlerts ?? []),
         lastUpdated: this.healthContext?.lastUpdated ?? new Date().toISOString(),
+        conditions: (this.healthContext?.conditions ?? []).map(c => ({
+          name: (c as any).name ?? '',
+          severity: (c as any).severity ?? null,
+          isActive: (c as any).isActive ?? (c as any).is_active === true,
+        })),
+        allergies: this.healthContext?.allergies ?? this.patientContext?.allergies.list ?? [],
+        hospital: this.healthContext?.hospital
+          ? {
+              name: (this.healthContext.hospital as any).name ?? null,
+              phone: (this.healthContext.hospital as any).phone ?? null,
+              address: (this.healthContext.hospital as any).address ?? null,
+            }
+          : undefined,
+        emergencyContacts: (this.healthContext?.emergency?.contacts ?? []).map(c => ({
+          name: (c as any).name ?? '',
+          phone: (c as any).phone ?? '',
+          relation: (c as any).relation ?? undefined,
+        })),
+        profileCompletion: this.healthContext?.profileCompletion
+          ? {
+              percentage: this.healthContext.profileCompletion.percentage ?? 0,
+              missingFields: this.healthContext.profileCompletion.missingFields ?? [],
+            }
+          : undefined,
       }
     );
 
@@ -354,71 +360,6 @@ class AIManager {
       provider: result.provider,
       model: result.model,
       finishReason: result.finishReason,
-      insights: allInsights,
-      requiresEmergencyEscalation: validationResult.requiresEmergencyEscalation,
-    };
-  }
-
-  private async generateViaEdgeFunction(userMessage: string, ctx: HealthContextData): Promise<AIResponse> {
-    const { insights: healthInsights } = buildHealthContext(ctx);
-    const patientInsights = this.buildPatientInsights(this.patientContext);
-    const allInsights = [...healthInsights, ...patientInsights];
-
-    const v = ctx.latestVitals;
-    const vitalsSummary = [
-      v.heartRate ? `HR: ${v.heartRate} bpm` : '',
-      v.bloodPressureSys ? `BP: ${v.bloodPressureSys}/${v.bloodPressureDia} mmHg` : '',
-      v.oxygenSaturation ? `SpO2: ${v.oxygenSaturation}%` : '',
-      v.temperature ? `Temp: ${v.temperature}C` : '',
-    ].filter(Boolean).join(' | ') || 'No vitals data';
-
-    const medsSummary = (ctx.medications ?? [])
-      .map(m => typeof m === 'string' ? m : (m as any).name ?? '')
-      .filter(Boolean)
-      .join(', ') || 'No medications';
-
-    const fullVitals = `${vitalsSummary}\nMedications: ${medsSummary}`;
-
-    const messages: EdgeChatMessage[] = this.reasoningState.messages.map(m => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    }));
-
-    const lastMsg = messages[messages.length - 1];
-    if (!lastMsg || lastMsg.role !== 'user' || lastMsg.content !== userMessage) {
-      messages.push({ role: 'user', content: userMessage });
-    }
-
-    console.log('[AI Manager] Using Supabase Edge Function for AI response');
-
-    let reply: string;
-    try {
-      reply = await sendChat(messages, fullVitals);
-    } catch (edgeErr) {
-      const errMsg = edgeErr instanceof Error ? edgeErr.message : String(edgeErr);
-      console.error('[AI Manager] Edge Function also failed:', errMsg);
-      throw new Error(`AI service unavailable: ${errMsg}`);
-    }
-
-    const validationResult = MedicalSafetyValidator.validateMedicalResponse(
-      reply,
-      {
-        allergies: this.patientContext?.allergies.list,
-        conditions: this.patientContext?.conditions.list.map(c => c.name),
-        currentMedications: this.patientContext?.medications.active.map(m => m.name),
-        age: this.patientContext?.age ?? undefined,
-      }
-    );
-
-    const safeContent = validationResult.isSafe ? reply : validationResult.sanitizedResponse;
-
-    this.reasoningState = addAssistantMessage(this.reasoningState, safeContent);
-
-    return {
-      content: safeContent,
-      provider: 'Gemini (Edge)',
-      model: 'gemini-2.5-flash',
-      finishReason: 'stop',
       insights: allInsights,
       requiresEmergencyEscalation: validationResult.requiresEmergencyEscalation,
     };
@@ -538,7 +479,8 @@ class AIManager {
 
   private async makeRequest(
     provider: AIProvider,
-    messages: Array<{ role: string; content: string; reasoning?: string }>
+    messages: Array<{ role: string; content: string; reasoning?: string }>,
+    callerSignal?: AbortSignal
   ): Promise<Response> {
     const url = this.getApiUrl(provider.id);
     const headers = this.getHeaders(provider.id);
@@ -551,7 +493,12 @@ class AIManager {
       stream: false,
     };
 
-    const controller = createTimeoutController(this.config.timeoutMs);
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort(), this.config.timeoutMs);
+
+    const combinedSignal = callerSignal
+      ? AbortSignal.any([callerSignal, timeoutController.signal])
+      : timeoutController.signal;
 
     let response: Response;
     try {
@@ -559,11 +506,18 @@ class AIManager {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal: combinedSignal,
       });
     } catch (fetchError: unknown) {
+      if (callerSignal?.aborted) {
+        const err = new Error('Aborted');
+        err.name = 'AbortError';
+        throw err;
+      }
       const msg = fetchError instanceof Error ? fetchError.message : String(fetchError);
       throw new Error(`[AI Manager] Network request failed: ${msg}`);
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     if (!response.ok) {

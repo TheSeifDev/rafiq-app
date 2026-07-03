@@ -1,13 +1,3 @@
-/**
- * StreamingEngine — Non-streaming utilities for Expo SDK 54 React Native.
- *
- * IMPORTANT: React Native's fetch runtime does NOT support response.body /
- * ReadableStream / getReader(). All streaming code has been removed.
- * Use parseJSONResponse() for safe, non-streaming AI response parsing.
- */
-
-// ── Types re-exported for backward compatibility ──────────────────────────────
-
 export interface StreamChunk {
   type: 'content' | 'reasoning' | 'done' | 'error';
   content: string;
@@ -39,14 +29,6 @@ const DEFAULT_CONFIG: StreamingConfig = {
   timeoutMs: 60000,
 };
 
-// ── Safe JSON response parser (replaces parseSSEStream) ───────────────────────
-
-/**
- * Safely parse an AI API JSON response.
- * Returns the content string and optional reasoning string.
- * Never throws "No response body" — uses response.text() which is
- * universally supported in React Native / Expo SDK 54.
- */
 export async function parseJSONResponse(response: Response): Promise<{
   content: string;
   reasoning?: string;
@@ -98,15 +80,6 @@ export async function parseJSONResponse(response: Response): Promise<{
   return { content, reasoning, finishReason };
 }
 
-/**
- * REMOVED — parseSSEStream used response.body.getReader() which is
- * unsupported in React Native / Expo SDK 54.
- *
- * Kept as a stub to prevent import errors in files that reference it.
- * Always throws a clear, actionable error.
- *
- * @deprecated Use parseJSONResponse() instead.
- */
 export async function parseSSEStream(
   _response: Response,
   _onChunk: (chunk: StreamChunk) => void,
@@ -119,16 +92,9 @@ export async function parseSSEStream(
   );
 }
 
-/**
- * REMOVED — SSE chunk parser for legacy SSE streams.
- * Kept as stub for import compatibility.
- * @deprecated
- */
 export function parseSSEChunk(_line: string): StreamChunk | null {
   return null;
 }
-
-// ── Retry helper ──────────────────────────────────────────────────────────────
 
 export async function withRetry<T>(
   fn: () => Promise<T>,
@@ -156,15 +122,20 @@ export async function withRetry<T>(
   throw lastError;
 }
 
-// ── Timeout controller ────────────────────────────────────────────────────────
-
-export function createTimeoutController(timeoutMs: number): AbortController {
-  const controller = new AbortController();
-  setTimeout(() => controller.abort(), timeoutMs);
-  return controller;
+export interface TimeoutController {
+  controller: AbortController;
+  cancel: () => void;
 }
 
-// ── Stream stats (kept for TS compat, no streaming occurs) ───────────────────
+export function createTimeoutController(timeoutMs: number): TimeoutController {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  controller.signal.addEventListener('abort', () => clearTimeout(id));
+  return {
+    controller,
+    cancel: () => clearTimeout(id),
+  };
+}
 
 export function createStreamStats(): StreamStats {
   return {

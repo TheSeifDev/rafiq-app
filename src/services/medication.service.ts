@@ -16,7 +16,6 @@ export type Medication = {
   instructions: string | null;
   is_active: boolean;
 
-  // v2 (backward-compatible; may be null for existing rows)
   strength?: string | null;
   category?: string | null;
   reason?: string | null;
@@ -58,7 +57,6 @@ export type MedicationLogInsert = {
 
 export const medicationService = {
   async getMedications(patientId: string): Promise<Medication[]> {
-    // Always try local first
     const local = await listWhere<Record<string, unknown>>(
       'medications',
       'patient_id = ? AND deleted_at IS NULL',
@@ -67,7 +65,6 @@ export const medicationService = {
     );
     if (local.length > 0) return local as unknown as Medication[];
 
-    // Guard: Supabase columns are UUID type — non-UUID patient IDs will be rejected
     if (!isUuid(patientId)) {
       console.warn('[MedicationService] Skipping Supabase fallback: patientId is not a UUID', patientId);
       return [];
@@ -100,18 +97,22 @@ export const medicationService = {
     return (data ?? null) as Medication | null;
   },
 
-  async addMedication(payload: MedicationInsert): Promise<void> {
-    await upsertLocal('medications', { id: createUuid(), ...payload }, {
+  async addMedication(payload: MedicationInsert): Promise<{ id: string }> {
+    const id = createUuid();
+    await upsertLocal('medications', { id, ...payload }, {
       userId: payload.user_id ?? undefined,
       priority: 'normal',
     });
+    return { id };
   },
 
   async createMedication(payload: MedicationInsert): Promise<Medication> {
-    return upsertLocal('medications', { id: createUuid(), ...payload }, {
+    const id = createUuid();
+    const saved = await upsertLocal('medications', { id, ...payload }, {
       userId: payload.user_id ?? undefined,
       priority: 'normal',
-    }) as Promise<Medication>;
+    });
+    return (saved ?? { id, ...payload }) as unknown as Medication;
   },
 
   async updateMedication(id: string, payload: Partial<Medication>): Promise<void> {
@@ -200,14 +201,9 @@ export const medicationService = {
     return (data ?? []) as unknown as MedicationLog[];
   },
 
-  /**
-   * Mark a dose as taken (called from notification action button TAKEN).
-   * Logs the dose and decrements remaining_quantity if stock tracking is active.
-   */
   async markDoseTaken(medicationId: string): Promise<void> {
     const now = new Date().toISOString();
 
-    // Log the dose taken
     await upsertLocal('medication_logs', {
       id: createUuid(),
       medication_id: medicationId,
@@ -218,15 +214,21 @@ export const medicationService = {
       created_at: now,
     }, { priority: 'normal' });
 
-    // Decrement remaining quantity if stock tracking is active
     try {
       const med = await this.getMedication(medicationId);
-      if (med && typeof med.remaining_quantity === 'number' && med.remaining_quantity > 0) {
-        await updateLocal('medications', medicationId, {
-          remaining_quantity: med.remaining_quantity - 1,
-          updated_at: now,
-        }, { priority: 'normal' });
+      if (!med) return;
+      if (typeof med.remaining_quantity !== 'number' || med.remaining_quantity <= 0) return;
+
+      const qtyType = (med.quantity_type ?? 'pills').toLowerCase();
+      const decrementableTypes = ['pills', 'uses', 'strip', 'box', 'capsule', 'capsules', 'tablet', 'tablets'];
+      if (!decrementableTypes.includes(qtyType)) {
+        return;
       }
+
+      await updateLocal('medications', medicationId, {
+        remaining_quantity: Math.max(0, med.remaining_quantity - 1),
+        updated_at: now,
+      }, { priority: 'normal' });
     } catch (err) {
       console.warn('[MedicationService] markDoseTaken: stock decrement failed', err);
     }

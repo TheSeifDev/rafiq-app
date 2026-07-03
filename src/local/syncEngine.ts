@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { all, createUuid, jsonString, parseJson, run } from './db';
+import { all, createUuid, parseJson, run } from './db';
 import { allowedTables, logSync, normalizeForSqlite } from './repository';
 import { isUuid } from '../utils/uuid';
 
@@ -81,6 +81,38 @@ const UPDATED_AT_TABLES = new Set([
   'ai_context',
   'ai_personality',
 ]);
+
+const USER_SCOPED_TABLES = new Set([
+  'patients',
+  'patient_conditions',
+  'emergency_contacts',
+  'devices',
+  'esp32_devices',
+  'wearables',
+  'vitals_readings',
+  'medications',
+  'medication_logs',
+  'reminders',
+  'notifications',
+  'notification_receipts',
+  'alerts',
+  'emergency_events',
+  'fall_detection_events',
+  'gas_alerts',
+  'oxygen_alerts',
+  'heart_rate_alerts',
+  'respiratory_alerts',
+  'ai_conversations',
+  'ai_messages',
+  'ai_memory',
+  'ai_context',
+  'ai_personality',
+  'ai_voice_sessions',
+  'ai_emotion_logs',
+  'ai_reminders',
+]);
+
+const PULL_PAGE_SIZE = 1000;
 
 const UUID_REFERENCE_COLUMNS = new Set([
   'id',
@@ -209,23 +241,34 @@ export const localSyncEngine = {
 
     for (const table of tables) {
       try {
-        let query = supabase.from(table).select('*').limit(1000);
-        if (options.since && UPDATED_AT_TABLES.has(table)) query = query.gte('updated_at', options.since);
-        const { data, error } = await query;
-        if (error) throw new Error(error.message);
+        let offset = 0;
+        let pageRows: Record<string, unknown>[] = [];
+        do {
+          let query = supabase.from(table).select('*').range(offset, offset + PULL_PAGE_SIZE - 1);
+          if (USER_SCOPED_TABLES.has(table)) {
+            query = query.eq('user_id', options.userId);
+          }
+          if (options.since && UPDATED_AT_TABLES.has(table)) {
+            query = query.gte('updated_at', options.since);
+          }
+          const { data, error } = await query;
+          if (error) throw new Error(error.message);
 
-        for (const row of data ?? []) {
-          const normalized = normalizeForSqlite(table, row as Record<string, unknown>);
-          const keys = Object.keys(normalized);
-          if (!keys.length) continue;
-          const update = keys.filter((key) => key !== 'id').map((key) => `${key} = excluded.${key}`).join(', ');
-          await run(
-            `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})
-             ON CONFLICT(id) DO UPDATE SET ${update}`,
-            keys.map((key) => normalized[key] as string | number | boolean | null),
-          );
-          pulled++;
-        }
+          pageRows = (data ?? []) as Record<string, unknown>[];
+          for (const row of pageRows) {
+            const normalized = normalizeForSqlite(table, row);
+            const keys = Object.keys(normalized);
+            if (!keys.length) continue;
+            const update = keys.filter((key) => key !== 'id').map((key) => `${key} = excluded.${key}`).join(', ');
+            await run(
+              `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})
+               ON CONFLICT(id) DO UPDATE SET ${update}`,
+              keys.map((key) => normalized[key] as string | number | boolean | null),
+            );
+            pulled++;
+          }
+          offset += PULL_PAGE_SIZE;
+        } while (pageRows.length === PULL_PAGE_SIZE);
       } catch (err) {
         failed++;
         await logSync({
@@ -241,31 +284,6 @@ export const localSyncEngine = {
 
     await logSync({ userId: options.userId, direction: 'pull', status: failed ? 'partial' : 'success', pulled, failed });
     return { pulled, failed };
-  },
-
-  async recordRealtimeEvent(params: {
-    userId?: string;
-    patientId?: string;
-    tableName: string;
-    recordId?: string;
-    eventType: 'INSERT' | 'UPDATE' | 'DELETE' | 'BROADCAST';
-    payload: Record<string, unknown>;
-  }): Promise<void> {
-    await run(
-      `INSERT INTO realtime_events
-        (id, user_id, patient_id, table_name, record_id, event_type, payload, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        createUuid(),
-        params.userId ?? null,
-        params.patientId ?? null,
-        params.tableName,
-        params.recordId ?? null,
-        params.eventType,
-        jsonString(params.payload),
-        new Date().toISOString(),
-      ],
-    );
   },
 };
 

@@ -1,7 +1,3 @@
-/**
- * Wearable Repository — SQLite operations for wearable data
- */
-
 import * as SQLite from 'expo-sqlite';
 import type {
   WearableConnection,
@@ -43,7 +39,7 @@ class WearableRepository {
       connection.deleted_by,
     ]);
 
-    await (db as any).execAsync(sql, bindings);
+    await db.runAsync(sql, bindings as SQLite.SQLiteBindValue[]);
   }
 
   async getActiveConnections(db: SQLite.SQLiteDatabase): Promise<WearableConnection[]> {
@@ -53,7 +49,7 @@ class WearableRepository {
        ORDER BY connected_at DESC`
     );
 
-    return rows.map(this.mapConnectionRow);
+    return rows.map((row) => this.mapConnectionRow(row));
   }
 
   async getConnectionsByUser(
@@ -67,7 +63,7 @@ class WearableRepository {
       [userId]
     );
 
-    return rows.map(this.mapConnectionRow);
+    return rows.map((row) => this.mapConnectionRow(row));
   }
 
   async markConnectionDeleted(
@@ -76,7 +72,7 @@ class WearableRepository {
     deletedBy: string,
     deletedAt: string
   ): Promise<void> {
-    await (db as any).execAsync(
+    await db.runAsync(
       `UPDATE wearable_connections
        SET is_active = 0, is_deleted = 1, deleted_at = ?, deleted_by = ?, updated_at = ?
        WHERE id = ?`,
@@ -90,7 +86,7 @@ class WearableRepository {
     lastSync: string
   ): Promise<void> {
     const now = new Date().toISOString();
-    await (db as any).execAsync(
+    await db.runAsync(
       `UPDATE wearable_connections SET last_sync = ?, updated_at = ? WHERE id = ?`,
       [lastSync, now, connectionId]
     );
@@ -132,7 +128,7 @@ class WearableRepository {
       vitals.deleted_by,
     ]);
 
-    await (db as any).execAsync(sql, bindings);
+    await db.runAsync(sql, bindings as SQLite.SQLiteBindValue[]);
   }
 
   async getVitals(
@@ -157,7 +153,7 @@ class WearableRepository {
     sql += ` ORDER BY recorded_at DESC`;
 
     const rows = await db.getAllAsync<Record<string, unknown>>(sql, args);
-    return rows.map(this.mapVitalsRow);
+    return rows.map((row) => this.mapVitalsRow(row));
   }
 
   async getLatestVitals(

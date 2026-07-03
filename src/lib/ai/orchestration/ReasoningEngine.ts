@@ -80,14 +80,14 @@ export function extractTopic(message: string): string | null {
   const topics = [
     'heart', 'heart rate', 'pulse', 'نبض',
     'blood pressure', 'pressure', 'ضغط',
-    'medication', 'medicine', 'دواء', 'دواء',
+    'medication', 'medicine', 'دواء',
     'sleep', 'نوم', 'sleeping',
     'food', 'meal', 'طعام', 'أكل',
     'exercise', 'workout', 'رياضة',
     'temperature', 'fever', 'حرارة', 'حمى',
     'oxygen', 'spo2', 'أكسجين',
     'sugar', 'glucose', 'سكر',
-    'weight', 'weight', 'وزن',
+    'weight', 'وزن',
     'symptom', 'أعراض',
     'emergency', 'طوارئ',
   ];

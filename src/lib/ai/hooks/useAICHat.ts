@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { aiManager, type AIResponse, type HealthContextData, type StreamChunk } from '../orchestration';
 import { patientContextAggregator, type PatientContext } from '../../../services/ai/PatientContextAggregator';
+import { sanitizeForAI } from '../security/sanitizeForAI';
 
 const STORAGE_KEY = '@rafiq_ai_state';
 
@@ -229,10 +230,25 @@ export function useAICHat({
         if (effectiveUserId) {
           try {
             const patientContext = await patientContextAggregator.aggregate(effectiveUserId);
-            healthContextToUse = convertPatientContextToHealthContext(patientContext);
+
+            aiManager.setPatientContext(patientContext);
+
+            const existingContext = aiManager.getExistingHealthContext?.();
+            const converted = convertPatientContextToHealthContext(patientContext);
+            healthContextToUse = {
+              ...converted,
+              latestVitals: {
+                heartRate:       existingContext?.latestVitals?.heartRate       ?? converted.latestVitals?.heartRate,
+                bloodPressureSys:existingContext?.latestVitals?.bloodPressureSys ?? converted.latestVitals?.bloodPressureSys,
+                bloodPressureDia:existingContext?.latestVitals?.bloodPressureDia ?? converted.latestVitals?.bloodPressureDia,
+                oxygenSaturation:existingContext?.latestVitals?.oxygenSaturation ?? converted.latestVitals?.oxygenSaturation,
+                temperature:     existingContext?.latestVitals?.temperature     ?? converted.latestVitals?.temperature,
+              },
+              recentAlerts: existingContext?.recentAlerts ?? converted.recentAlerts,
+              foodLogs:     existingContext?.foodLogs     ?? converted.foodLogs,
+              sleepRecords: existingContext?.sleepRecords ?? converted.sleepRecords,
+            };
           } catch (ctxErr) {
-            // Non-fatal: health context loading failed (UUID mismatch, network, etc.)
-            // The AI chat should still work without patient context
             console.warn('[AI Chat] Health context aggregation failed (non-fatal):', ctxErr);
           }
         }
@@ -245,12 +261,13 @@ export function useAICHat({
             aiManager.updateHealthContext(healthContextToUse);
           }
         }
-        // *** FIX #2b: If health context failed and aiManager still not initialized, ***
-        // *** the generate() method in AIManager now auto-initializes with fallback ***
+
+        const sanitizedContent = sanitizeForAI(content);
 
         const response: AIResponse = await aiManager.generate(
-          content,
+          sanitizedContent,
           (_chunk: StreamChunk) => { },
+          abortControllerRef.current?.signal,
         );
 
         const suggestedReplies = generateSuggestions(content, response.content, isRTL);
@@ -301,7 +318,6 @@ export function useAICHat({
           return;
         }
 
-        // Detect 429 / rate limit errors from any layer
         const isRateLimit =
           err?.name === 'AIRateLimitError' ||
           err?.statusCode === 429 ||

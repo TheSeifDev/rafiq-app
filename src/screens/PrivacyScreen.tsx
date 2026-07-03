@@ -21,12 +21,11 @@ import { translations } from '../constants/translations';
 import { patientService } from '../services/patient.service';
 import { exportHealthData } from '../services/export.service';
 import { dataService } from '../services/data.service';
-import { safeRequestPermissions } from '../lib/notifications/notificationSafety';
+import { requestNotificationPermission } from '../lib/notifications/notificationService';
 import type { ProfileStackScreenProps } from '../navigation/types';
 
 type Props = ProfileStackScreenProps<'Privacy'>;
 
-// ── InfoRow (reusable UI row) ──
 function InfoRow({
   icon, iconColor, title, description, rightContent, isLast, darkMode, colors,
 }: {
@@ -50,13 +49,11 @@ function InfoRow({
   );
 }
 
-// ── Main Screen ──
 export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
   const { colors, darkMode } = useTheme();
   const language = useAppStore((s) => s.language);
   const t = translations[language];
 
-  // Type-safe accessor with fallback
   const tSafe = (key: string): string => {
     const val = (t as Record<string, string | undefined>)[key];
     return val ?? key;
@@ -65,37 +62,32 @@ export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
   const session = useAuthStore((s) => s.session);
   const signOut = useAuthStore((s) => s.signOut);
 
-  // ── Persisted health consent from zustand store ──
   const healthDataConsent = useAppStore((s) => s.healthDataConsent);
   const setHealthDataConsent = useAppStore((s) => s.setHealthDataConsent);
 
-  // ── Permission states — synced with device on mount ──
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [notifEnabled, setNotifEnabled] = useState(false);
 
-  // ── Loading states ──
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const surfaceBg = darkMode ? 'rgba(30, 41, 59, 0.80)' : 'rgba(255, 255, 255, 0.92)';
   const cardBorder = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
 
-  // ── Check real permission status on mount ──
   useEffect(() => {
     (async () => {
       try {
         const { status: locStatus } = await Location.getForegroundPermissionsAsync();
         setLocationEnabled(locStatus === 'granted');
-      } catch { /* Expo Go safe */ }
+      } catch {  }
 
       try {
-        const perm = await safeRequestPermissions();
-        setNotifEnabled(perm.granted);
-      } catch { /* Expo Go safe */ }
+        const granted = await requestNotificationPermission();
+        setNotifEnabled(granted);
+      } catch {  }
     })();
   }, []);
 
-  // ── Toggle Location Permission ──
   const handleLocationToggle = useCallback(async (val: boolean) => {
     if (val) {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -114,12 +106,11 @@ export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
     }
   }, [isAr]);
 
-  // ── Toggle Notification Permission ──
   const handleNotifToggle = useCallback(async (val: boolean) => {
     if (val) {
-      const perm = await safeRequestPermissions();
-      setNotifEnabled(perm.granted);
-      if (!perm.granted) {
+      const granted = await requestNotificationPermission();
+      setNotifEnabled(granted);
+      if (!granted) {
         Alert.alert(
           isAr ? 'مرفوض' : 'Denied',
           isAr ? 'يرجى تفعيل الإشعارات من الإعدادات' : 'Please enable notifications in Settings',
@@ -133,7 +124,6 @@ export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
     }
   }, [isAr]);
 
-  // ── Export Data (delegates to export.service.ts) ──
   const handleExport = useCallback(async () => {
     if (!session?.user.id) return;
     setExporting(true);
@@ -149,7 +139,6 @@ export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
     }
   }, [session, isAr]);
 
-  // ── Delete Account (real Supabase cascade) ──
   const handleDeleteAccount = useCallback(() => {
     Alert.alert(
       t.deleteAccount,
@@ -182,7 +171,6 @@ export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
     );
   }, [session, signOut, t, isAr]);
 
-  // ── Switch factory ──
   const makeSwitch = (val: boolean, onChange: (v: boolean) => void) => (
     <Switch
       value={val}
@@ -197,7 +185,7 @@ export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
       <ScreenHeader title={t.privacyLabel} onBack={() => navigation.goBack()} />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
 
-        {/* ── Data Usage ── */}
+        {}
         <View style={styles.sectionWrap}>
           <AppText style={[styles.sectionLabel, { color: colors.textSecondary }]}>{t.dataUsage}</AppText>
           <View style={[styles.card, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
@@ -208,7 +196,7 @@ export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
           </View>
         </View>
 
-        {/* ── Permissions ── */}
+        {}
         <View style={styles.sectionWrap}>
           <AppText style={[styles.sectionLabel, { color: colors.textSecondary }]}>{t.permissions}</AppText>
           <View style={[styles.card, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
@@ -236,11 +224,11 @@ export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
           </View>
         </View>
 
-        {/* ── Data Actions ── */}
+        {}
         <View style={styles.sectionWrap}>
           <AppText style={[styles.sectionLabel, { color: colors.textSecondary }]}>{t.healthData}</AppText>
           <View style={[styles.card, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
-            {/* Export */}
+            {}
             <TouchableOpacity activeOpacity={0.6} style={styles.actionRow} onPress={handleExport} disabled={exporting}>
               <View style={[styles.infoIconWrap, { backgroundColor: colors.primary + '12' }]}>
                 {exporting
@@ -254,7 +242,7 @@ export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
               <Ionicons name="chevron-forward" size={18} color={colors.textSecondary + '60'} />
             </TouchableOpacity>
 
-            {/* Delete Account */}
+            {}
             <TouchableOpacity
               activeOpacity={0.6}
               onPress={handleDeleteAccount}
@@ -275,7 +263,7 @@ export function PrivacyScreen({ navigation }: Props): React.JSX.Element {
           </View>
         </View>
 
-        {/* ── Legal ── */}
+        {}
         <View style={styles.sectionWrap}>
           <View style={[styles.card, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
             <TouchableOpacity activeOpacity={0.6} style={styles.legalRow} onPress={() => navigation.navigate('TermsOfService')}>
@@ -319,7 +307,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
-  // ── Data usage ──
   dataUsageContent: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -332,7 +319,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     lineHeight: 22,
   },
-  // ── Info rows ──
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -362,14 +348,12 @@ const styles = StyleSheet.create({
   infoRight: {
     marginLeft: spacing.sm,
   },
-  // ── Actions ──
   actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: spacing.md,
     gap: spacing.sm,
   },
-  // ── Legal ──
   legalRow: {
     flexDirection: 'row',
     alignItems: 'center',

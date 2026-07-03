@@ -3,7 +3,6 @@ import type { VitalsReading, VitalsReadingInsert } from '../types/database';
 import { toFiniteNumberOrNull } from '../utils/number';
 import { createUuid } from '../local/db';
 import { listWhere, upsertLocal } from '../local/repository';
-import { localSyncEngine } from '../local/syncEngine';
 import { isUuid } from '../utils/uuid';
 
 function normalizeVitalsReading(reading: unknown): VitalsReading {
@@ -20,9 +19,7 @@ function normalizeVitalsReading(reading: unknown): VitalsReading {
 }
 
 export const vitalsReadingService = {
-  /**
-   * Fetch the full vitals history for a patient, newest first.
-   */
+
   async getHistory(patientId: string): Promise<VitalsReading[]> {
     const local = await listWhere<Record<string, unknown>>(
       'vitals_readings',
@@ -32,7 +29,6 @@ export const vitalsReadingService = {
     );
     if (local.length > 0) return local.map(normalizeVitalsReading);
 
-    // Guard: Supabase patient_id column is uuid type — non-UUID IDs will be rejected
     if (!isUuid(patientId)) {
       console.warn('[VitalsReadingService] Skipping Supabase fallback: patientId is not a UUID', patientId);
       return [];
@@ -51,9 +47,6 @@ export const vitalsReadingService = {
     return (data ?? []).map(normalizeVitalsReading);
   },
 
-  /**
-   * Fetch only the most recent reading (used for the Home dashboard card).
-   */
   async getLatest(patientId: string): Promise<VitalsReading | null> {
     const local = await listWhere<Record<string, unknown>>(
       'vitals_readings',
@@ -63,7 +56,6 @@ export const vitalsReadingService = {
     );
     if (local[0]) return normalizeVitalsReading(local[0]);
 
-    // Guard: Supabase patient_id column is uuid type — non-UUID IDs will be rejected
     if (!isUuid(patientId)) {
       console.warn('[VitalsReadingService] Skipping Supabase fallback: patientId is not a UUID', patientId);
       return null;
@@ -81,9 +73,6 @@ export const vitalsReadingService = {
     return normalizeVitalsReading(data);
   },
 
-  /**
-   * Insert a new vitals reading (manual or smartwatch).
-   */
   async addReading(
     reading: VitalsReadingInsert
   ): Promise<{ data: VitalsReading | null; error: string | null }> {
@@ -102,10 +91,6 @@ export const vitalsReadingService = {
     }
   },
 
-  /**
-   * Subscribe to real-time inserts for a given patient.
-   * Returns the Supabase RealtimeChannel so the caller can unsubscribe.
-   */
   subscribeToReadings(
     patientId: string,
     callback: (reading: VitalsReading) => void
@@ -119,17 +104,10 @@ export const vitalsReadingService = {
           schema: 'public',
           table: 'vitals_readings',
           filter: `patient_id=eq.${patientId}`,
-      },
-      async (payload) => {
-        await localSyncEngine.recordRealtimeEvent({
-          patientId,
-          tableName: 'vitals_readings',
-          recordId: (payload.new as { id?: string }).id,
-          eventType: 'INSERT',
-          payload: payload.new as Record<string, unknown>,
-        });
-        callback(normalizeVitalsReading(payload.new));
-      }
+        },
+        async (payload) => {
+          callback(normalizeVitalsReading(payload.new));
+        }
       )
       .subscribe();
 

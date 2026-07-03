@@ -24,8 +24,6 @@ import type { ThemeColors } from '../../theme';
 
 export type MedicationFormResult = ReturnType<typeof validateMedicationDraft>['normalized'];
 
-// ─── Module-level sub-components (stable references, no re-mount) ──
-
 interface FieldProps {
   label: string;
   value: string;
@@ -100,8 +98,6 @@ function InlineError({ text }: { text: string }): React.JSX.Element {
     </View>
   );
 }
-
-// ─── Main component ──────────────────────────────────────────
 
 export function MedicationFormSheet({
   visible,
@@ -396,7 +392,7 @@ function toDraft(med: Medication | null): MedicationFormDraft {
     form: med?.form ?? '',
     scheduleType: (med?.schedule_type ?? med?.frequency ?? 'once_daily') as string,
     mealRule: med?.meal_rule ?? 'after_food',
-    times: [times[0] ?? '08:00', times[1] ?? '', times[2] ?? ''],
+    times: times.length > 0 ? times : ['08:00'],
     quantityType: med?.quantity_type ?? 'pills',
     totalQuantity: typeof med?.total_quantity === 'number' && Number.isFinite(med.total_quantity) ? String(med.total_quantity) : '',
     remainingQuantity:

@@ -99,7 +99,6 @@ export class PatientContextAggregator {
     const patient = await patientService.getProfile(userId);
     if (!patient) {
       console.warn('[PatientContextAggregator] Patient profile not found for userId:', userId, '— returning minimal context');
-      // Return minimal context instead of throwing — AI can still work without full patient data
       return this.buildMinimalContext();
     }
 
@@ -154,7 +153,6 @@ export class PatientContextAggregator {
       adherence[med.id] = 0;
     });
 
-    // FIX: Use PatientConditionRow type (not PatientNormalizedRow)
     const conditionList = conditionRows.map((row: PatientConditionRow) => ({
       name: row.condition_name,
       severity: row.severity ?? null,
@@ -167,7 +165,54 @@ export class PatientContextAggregator {
     const allergyList = conditionList
       .filter(c => c.name.toLowerCase().includes('allergy'))
       .map(c => c.name);
+    try {
+      const patientAllergiesRaw = (patient as any).allergies;
+      if (patientAllergiesRaw) {
+        let patientAllergies: string[] = [];
+        if (typeof patientAllergiesRaw === 'string') {
+          try {
+            const parsed = JSON.parse(patientAllergiesRaw);
+            patientAllergies = Array.isArray(parsed) ? parsed.filter(Boolean) : [patientAllergiesRaw];
+          } catch {
+            patientAllergies = patientAllergiesRaw.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+          }
+        } else if (Array.isArray(patientAllergiesRaw)) {
+          patientAllergies = patientAllergiesRaw.filter(Boolean);
+        }
+        for (const a of patientAllergies) {
+          if (typeof a === 'string' && !allergyList.some(existing => existing.toLowerCase() === a.toLowerCase())) {
+            allergyList.push(a);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[PatientContextAggregator] Failed to read patient.allergies:', e);
+    }
     const allergyHistory: string[] = [];
+
+    let profileCompletion = {
+      percentage: 0,
+      completedFields: [] as string[],
+      missingFields: [] as string[],
+      readinessScore: 0,
+    };
+    try {
+      const { patientValidationService } = await import('../patient/patientValidation.service');
+      const validation = patientValidationService.validatePatientProfile({
+        ...patient,
+        emergency_contact: emergencyContacts,
+        medications,
+        conditions: conditionList,
+      } as any);
+      profileCompletion = {
+        percentage: validation.completionPercentage ?? 0,
+        completedFields: [],
+        missingFields: validation.missingFields ?? [],
+        readinessScore: Math.min(100, validation.completionPercentage ?? 0),
+      };
+    } catch (e) {
+      console.warn('[PatientContextAggregator] Failed to compute profile completion:', e);
+    }
 
     const nutrition = {
       mealsToday: 0,
@@ -187,12 +232,7 @@ export class PatientContextAggregator {
       ),
     };
 
-    const profileCompletion = {
-      percentage: 0,
-      completedFields: [] as string[],
-      missingFields: [] as string[],
-      readinessScore: 0,
-    };
+    const profileCompletionFinal = profileCompletion;
 
     return {
       fullName: patient.full_name,
@@ -237,7 +277,7 @@ export class PatientContextAggregator {
 
       recentAIContext,
 
-      profileCompletion,
+      profileCompletion: profileCompletionFinal,
     };
   }
 
@@ -248,8 +288,8 @@ export class PatientContextAggregator {
     lastConversation: string | null;
   }> {
     try {
-      const storageKey = `@rafiq_ai_state_${userId}`;
-      const stored = await AsyncStorage.getItem(storageKey);
+      const stored = (await AsyncStorage.getItem('@rafiq_ai_state')) ??
+        (await AsyncStorage.getItem(`@rafiq_ai_state_${userId}`));
       if (!stored) {
         return { symptoms: [], concerns: [], followUpTopics: [], lastConversation: null };
       }

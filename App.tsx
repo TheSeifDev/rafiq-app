@@ -13,11 +13,16 @@ import { useAuthStore } from './src/store/auth.store';
 import { initNotificationsOnce } from './src/lib/notifications/medicationReminders';
 import { navigationRef } from './src/navigation/MainNavigator';
 import { initializeNotificationChannels } from './src/lib/notifications/notificationPipeline';
+import {
+  scheduleProfileCompletionReminder,
+  cancelProfileCompletionReminder,
+  PROFILE_COMPLETION_IDENTIFIER,
+} from './src/lib/notifications/notificationService';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { initMonitoring } from './src/lib/monitoring';
 
 if (Constants.appOwnership === 'expo') {
-  Notifications.setAutoServerRegistrationEnabledAsync(false).catch(() => {});
+  Notifications.setAutoServerRegistrationEnabledAsync(false).catch(() => { });
 }
 
 LogBox.ignoreLogs([
@@ -29,6 +34,7 @@ function Boot(): React.JSX.Element {
   const initialize = useAuthStore((state) => state.initialize);
   const language = useAppStore((state) => state.language);
   const hydrate = useAppStore((state) => state.hydrate);
+  const session = useAuthStore((state) => state.session);
 
   useEffect(() => {
     initMonitoring();
@@ -63,6 +69,39 @@ function Boot(): React.JSX.Element {
     // Delay permission requests slightly to avoid blocking app startup
     setTimeout(requestPermissions, 2000);
   }, [hydrate, initialize]);
+
+  // ─── Hourly profile-completion reminder ────────────────────────────
+  //
+  // FIX: User explicitly requested "رساله تاكد كل ساعه من ملئ جميع البيانات"
+  // (an hourly reminder that checks all data is filled). The old in-app modal
+  // only fired when AppState === 'active' and was dismissable forever. This
+  // schedules a proper local notification (visible in system tray even when
+  // the app is killed) that repeats every hour and prompts the user to
+  // complete their medical profile. We re-schedule on language change and
+  // cancel on logout.
+  useEffect(() => {
+    if (!session?.user?.id) {
+      cancelProfileCompletionReminder().catch(() => undefined);
+      return;
+    }
+    scheduleProfileCompletionReminder({
+      language: language === 'ar' ? 'ar' : 'en',
+      userId: session.user.id,
+    }).catch((e) => console.warn('[ProfileReminder] schedule failed:', e));
+
+    // Listener: when the notification is delivered, optionally re-validate
+    // and dismiss if the profile is complete. (Best-effort; non-fatal.)
+    const sub = Notifications.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data ?? {};
+      if (data?.kind !== 'profile_completion' && data?.notificationKey !== PROFILE_COMPLETION_IDENTIFIER) {
+        return;
+      }
+      // Profile completeness is checked by ProfileCompletionReminder component
+      // in MainNavigator when the user taps the notification. The notification
+      // itself is left visible so the user can act on it.
+    });
+    return () => sub.remove();
+  }, [session?.user?.id, language]);
 
   const isRTL = language === 'ar';
 

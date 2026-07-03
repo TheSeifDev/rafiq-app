@@ -1,4 +1,4 @@
-export const RAFIQ_SQLITE_SCHEMA_VERSION = 7;
+export const RAFIQ_SQLITE_SCHEMA_VERSION = 8;
 
 export const RAFIQ_SQLITE_SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -675,17 +675,8 @@ CREATE TABLE IF NOT EXISTS sync_logs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS realtime_events (
-  id TEXT PRIMARY KEY,
-  user_id TEXT,
-  patient_id TEXT REFERENCES patients(id) ON DELETE SET NULL,
-  table_name TEXT NOT NULL,
-  record_id TEXT,
-  event_type TEXT NOT NULL,
-  payload TEXT NOT NULL DEFAULT '{}',
-  processed_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+-- FIX (P3-3): realtime_events table removed — no consumer ever read from it.
+-- A v8 migration in db.ts drops it if it already exists from a prior install.
 
 CREATE INDEX IF NOT EXISTS idx_patients_user_id ON patients(user_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_patient_priority ON emergency_contacts(patient_id, priority);
@@ -702,6 +693,5 @@ CREATE INDEX IF NOT EXISTS idx_mqtt_events_topic_time ON mqtt_events(topic, rece
 CREATE INDEX IF NOT EXISTS idx_sensor_readings_device_time ON sensor_readings(device_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation_time ON ai_messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_pending_sync_ready ON pending_sync(status, next_attempt_at, priority);
-CREATE INDEX IF NOT EXISTS idx_realtime_events_user_time ON realtime_events(user_id, created_at DESC);
 
 INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (${RAFIQ_SQLITE_SCHEMA_VERSION}, 'unified-offline-schema');`;

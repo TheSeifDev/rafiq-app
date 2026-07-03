@@ -1,7 +1,3 @@
-/**
- * Database Helpers — production-safe UUID and bindings
- */
-
 import 'react-native-get-random-values';
 
 function generateUUID(): string {
@@ -9,8 +5,6 @@ function generateUUID(): string {
 }
 
 export function generateId(_prefix?: string): string {
-  // Always return a bare UUID — Supabase uuid columns reject prefixed IDs.
-  // The prefix parameter is kept for API compatibility but is intentionally ignored.
   return generateUUID();
 }
 
@@ -53,9 +47,24 @@ export async function getDeviceId(): Promise<string> {
     return cachedDeviceId;
   }
 
-  cachedDeviceId = generateId('device');
-
-  return cachedDeviceId;
+  try {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+    const KEY = '@rafiq_device_id';
+    const existing = await AsyncStorage.getItem(KEY);
+    if (existing) {
+      cachedDeviceId = existing;
+      return existing;
+    }
+    const fresh = generateId('device');
+    await AsyncStorage.setItem(KEY, fresh);
+    cachedDeviceId = fresh;
+    return fresh;
+  } catch (err) {
+    console.warn('[helpers] getDeviceId: AsyncStorage unavailable, using session-scoped ID:', err);
+    const fallback = generateId('device');
+    cachedDeviceId = fallback;
+    return fallback;
+  }
 }
 
 export function getCurrentTimestamp(): string {

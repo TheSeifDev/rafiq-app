@@ -1,12 +1,6 @@
-/**
- * Enhanced Notification Service — Production Ready
- * Integrates with notificationPipeline for instant delivery
- */
-
 import { supabase } from '../lib/supabase';
-import type { RealtimeChannel } from '@supabase/supabase-js';
 import { deleteLocal, listWhere, updateLocal, upsertLocal } from '../local/repository';
-import { localSyncEngine } from '../local/syncEngine';
+import { isUuid } from '../utils/uuid';
 import {
   NotificationCategory,
   enqueueNotification,
@@ -22,8 +16,6 @@ import {
   notifyAIWarning,
   notifyFoodAlert,
 } from '../lib/notifications/notificationPipeline';
-
-// ─── Types ──────────────────────────────────────────────────────
 
 export type NotificationCategoryType = NotificationCategory;
 
@@ -43,10 +35,7 @@ export interface AppNotification {
   created_at: string;
 }
 
-// ─── Service ────────────────────────────────────────────────────
-
 export const notificationService = {
-  // ── Fetch notifications with full schema
   async getNotifications(userId: string): Promise<AppNotification[]> {
     const local = await listWhere<Record<string, unknown>>(
       'notifications',
@@ -70,8 +59,16 @@ export const notificationService = {
     return (data ?? []) as AppNotification[];
   },
 
-  // ── Get unread count
   async getUnreadCount(userId: string): Promise<number> {
+    const local = await listWhere<Record<string, unknown>>(
+      'notifications',
+      'user_id = ? AND is_read = 0',
+      [userId],
+    );
+    if (local.length > 0) return local.length;
+
+    if (!isUuid(userId)) return 0;
+
     const { count, error } = await supabase
       .from('notifications')
       .select('*', { count: 'exact', head: true })
@@ -82,8 +79,17 @@ export const notificationService = {
     return count ?? 0;
   },
 
-  // ── Get notifications by category
   async getByCategory(userId: string, category: NotificationCategory): Promise<AppNotification[]> {
+    const local = await listWhere<Record<string, unknown>>(
+      'notifications',
+      'user_id = ? AND category = ?',
+      [userId, category],
+      'created_at DESC LIMIT 100',
+    );
+    if (local.length > 0) return local as unknown as AppNotification[];
+
+    if (!isUuid(userId)) return [];
+
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
@@ -93,11 +99,23 @@ export const notificationService = {
       .limit(100);
 
     if (error) throw new Error(error.message);
+    for (const notification of data ?? []) {
+      await upsertLocal('notifications', notification as Record<string, unknown>, { enqueue: false, userId });
+    }
     return (data ?? []) as AppNotification[];
   },
 
-  // ── Get emergency/critical notifications
   async getEmergencyAlerts(userId: string): Promise<AppNotification[]> {
+    const local = await listWhere<Record<string, unknown>>(
+      'notifications',
+      'user_id = ? AND severity = ?',
+      [userId, 'critical'],
+      'created_at DESC LIMIT 50',
+    );
+    if (local.length > 0) return local as unknown as AppNotification[];
+
+    if (!isUuid(userId)) return [];
+
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
@@ -107,10 +125,12 @@ export const notificationService = {
       .limit(50);
 
     if (error) throw new Error(error.message);
+    for (const notification of data ?? []) {
+      await upsertLocal('notifications', notification as Record<string, unknown>, { enqueue: false, userId });
+    }
     return (data ?? []) as AppNotification[];
   },
 
-  // ── Create notification via pipeline (instant delivery)
   async createNotification(payload: {
     user_id: string;
     title: string;
@@ -135,12 +155,10 @@ export const notificationService = {
     });
   },
 
-  // ── Mark as read
   async markAsRead(id: string): Promise<void> {
     await updateLocal('notifications', id, { is_read: true, read_at: new Date().toISOString() }, { priority: 'normal' });
   },
 
-  // ── Mark all as read
   async markAllRead(userId: string): Promise<void> {
     const rows = await listWhere<Record<string, unknown>>('notifications', 'user_id = ? AND is_read = 0', [userId]);
     for (const row of rows) {
@@ -148,23 +166,29 @@ export const notificationService = {
     }
   },
 
-  // ── Pin notification (emergency)
   async pinNotification(id: string): Promise<void> {
     await updateLocal('notifications', id, { is_pinned: true }, { priority: 'high' });
   },
 
-  // ── Delete notification
   async deleteNotification(id: string): Promise<void> {
     await deleteLocal('notifications', id, { hard: true, priority: 'normal' });
   },
 
-  // ── Delete multiple
   async deleteNotifications(ids: string[]): Promise<void> {
     for (const id of ids) await this.deleteNotification(id);
   },
 
-  // ── Search notifications
   async searchNotifications(userId: string, query: string): Promise<AppNotification[]> {
+    const local = await listWhere<Record<string, unknown>>(
+      'notifications',
+      'user_id = ? AND (title LIKE ? OR body LIKE ?)',
+      [userId, `%${query}%`, `%${query}%`],
+      'created_at DESC LIMIT 100',
+    );
+    if (local.length > 0) return local as unknown as AppNotification[];
+
+    if (!isUuid(userId)) return [];
+
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
@@ -174,25 +198,19 @@ export const notificationService = {
       .limit(100);
 
     if (error) throw new Error(error.message);
+    for (const notification of data ?? []) {
+      await upsertLocal('notifications', notification as Record<string, unknown>, { enqueue: false, userId });
+    }
     return (data ?? []) as AppNotification[];
   },
 
-  // ── Subscribe to realtime (returns cleanup function)
   subscribe(userId: string, onInsert: (notification: AppNotification) => void): () => void {
     return subscribeToNotifications(userId, async (notification) => {
       await upsertLocal('notifications', notification as Record<string, unknown>, { enqueue: false, userId });
-      await localSyncEngine.recordRealtimeEvent({
-        userId,
-        tableName: 'notifications',
-        recordId: notification.id,
-        eventType: 'INSERT',
-        payload: notification as unknown as Record<string, unknown>,
-      });
       onInsert(notification);
     });
   },
 
-  // ── Backward-compatible aliases
   async getAll(userId: string): Promise<AppNotification[]> {
     return this.getNotifications(userId);
   },
@@ -201,7 +219,6 @@ export const notificationService = {
     return this.markAsRead(id);
   },
 
-  // ── Convenience notification methods
   async notifyEmergency(params: { userId: string; title: string; body: string; data?: Record<string, unknown> }): Promise<string> {
     return notifyEmergency(params);
   },

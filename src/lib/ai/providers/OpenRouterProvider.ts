@@ -38,13 +38,15 @@ class OpenRouterProvider implements AIProvider {
 
     if (this.apiKey) {
       const isValid = this.apiKey.startsWith('sk-or-v1-');
-      console.log(
-        '[OpenRouter] API key loaded:',
-        isValid ? 'valid format' : 'invalid format'
-      );
+      if (__DEV__) {
+        console.log(
+          '[OpenRouter] API key loaded:',
+          isValid ? 'valid format' : 'invalid format'
+        );
+      }
       this.apiKeyValidated = isValid;
     } else {
-      console.warn('[OpenRouter] No API key found in environment');
+      if (__DEV__) console.warn('[OpenRouter] No API key found in environment');
     }
 
     this.model = env.openRouterModel || model || DEFAULT_MODEL;
@@ -209,11 +211,35 @@ class OpenRouterProvider implements AIProvider {
         ? context.recentAlerts.map(a => `- ${a}`).join('\n')
         : '- No recent alerts';
 
+    const conditionsText =
+      context.conditions && context.conditions.length > 0
+        ? context.conditions.map(c => `- ${c.name}${c.severity ? ` (${c.severity})` : ''}${c.isActive === false ? ' [inactive]' : ''}`).join('\n')
+        : '- No conditions recorded';
+
+    const allergiesText =
+      context.allergies && context.allergies.length > 0
+        ? context.allergies.map(a => `- ${a}`).join('\n')
+        : '- No known allergies';
+
+    const hospitalText = context.hospital
+      ? `${context.hospital.name ?? 'Unknown hospital'}${context.hospital.phone ? ` • ${context.hospital.phone}` : ''}${context.hospital.address ? ` • ${context.hospital.address}` : ''}`
+      : '- No hospital recorded';
+
+    const emergencyText =
+      context.emergencyContacts && context.emergencyContacts.length > 0
+        ? context.emergencyContacts.map(c => `- ${c.name}${c.relation ? ` (${c.relation})` : ''}: ${c.phone}`).join('\n')
+        : '- No emergency contacts recorded';
+
+    const profileText = context.profileCompletion
+      ? `${context.profileCompletion.percentage}% complete${context.profileCompletion.missingFields.length > 0 ? ` (missing: ${context.profileCompletion.missingFields.join(', ')})` : ''}`
+      : 'Unknown';
+
     return `You are RAFIQ, a compassionate healthcare AI assistant for a medical monitoring app.
 
 CONTEXT:
 - Patient: ${context.patientName || 'User'}
 - Last Updated: ${context.lastUpdated}
+- Profile: ${profileText}
 
 LATEST VITALS:
 ${vitals.heartRate ? `❤️ Heart Rate: ${vitals.heartRate} bpm` : '❤️ No heart rate data'}
@@ -224,6 +250,18 @@ ${vitals.temperature ? `🌡️ Temperature: ${vitals.temperature}°C` : '🌡�
 CURRENT MEDICATIONS:
 ${medList || '- No medications recorded'}
 
+CONDITIONS:
+${conditionsText}
+
+ALLERGIES:
+${allergiesText}
+
+HOSPITAL:
+${hospitalText}
+
+EMERGENCY CONTACTS:
+${emergencyText}
+
 RECENT ALERTS:
 ${alertsText}
 
@@ -233,8 +271,9 @@ GUIDELINES:
 3. Focus on actionable health advice
 4. Never provide definitive diagnoses - always suggest consulting a doctor
 5. For emergencies, direct users to emergency services immediately
-6. Keep responses short and practical (2-4 sentences for quick answers)
-7. Use markdown for formatting when helpful
+6. CRITICAL: Always check the patient's allergies and conditions before recommending any medication or food
+7. Keep responses short and practical (2-4 sentences for quick answers)
+8. Use markdown for formatting when helpful
 
 Remember: You are a health assistant, not a doctor. Always encourage professional medical advice for serious concerns.`;
   }

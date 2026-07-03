@@ -2,13 +2,6 @@ import { AIProvider, AIMessage, HealthContext, StreamingCallback, AIProviderErro
 import { fetchWithRetry, type StreamConfig } from '../streaming';
 import { env } from '../../../config/env';
 
-/**
- * Groq Provider — uses Groq's OpenAI-compatible API as a fast, free-tier fallback.
- * Groq has higher rate limits than OpenRouter free tier.
- * Default model: llama-3.1-8b-instant (fast, good for health chat)
- * Override: EXPO_PUBLIC_GROQ_MODEL env variable
- */
-
 const DEFAULT_MODEL = 'llama-3.1-8b-instant';
 const API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
@@ -16,7 +9,7 @@ const FETCH_CONFIG: StreamConfig = {
   throttleMs: 16,
   bufferSize: 5,
   timeoutMs: 30000,
-  maxRetries: 1, // Groq is fast — only 1 retry
+  maxRetries: 1,
   retryDelayMs: 1000,
 };
 
@@ -24,7 +17,7 @@ interface ProviderHealth {
   isHealthy: boolean;
   lastError: string | null;
   consecutiveFailures: number;
-  rateLimitedUntil: number; // timestamp ms
+  rateLimitedUntil: number;
 }
 
 class GroqProvider implements AIProvider {
@@ -47,9 +40,10 @@ class GroqProvider implements AIProvider {
 
     if (this.apiKey) {
       const isValid = this.apiKey.startsWith('gsk_');
-      console.log('[Groq] API key loaded:', isValid ? 'valid format' : 'invalid format');
+      // FIX (P3-1): Only log API key validity in dev.
+      if (__DEV__) console.log('[Groq] API key loaded:', isValid ? 'valid format' : 'invalid format');
     } else {
-      console.warn('[Groq] No API key found in environment (EXPO_PUBLIC_GROQ_KEY)');
+      if (__DEV__) console.warn('[Groq] No API key found in environment (EXPO_PUBLIC_GROQ_KEY)');
     }
   }
 
@@ -191,6 +185,28 @@ class GroqProvider implements AIProvider {
       .map(m => `- ${m.name}${m.dosage ? ` (${m.dosage})` : ''}`)
       .join('\n');
 
+    // FIX (P2-14): Include conditions, allergies, hospital, emergency contacts
+    // so the fallback Groq provider has the same patient context as the
+    // primary OpenRouter path.
+    const conditionsText =
+      context.conditions && context.conditions.length > 0
+        ? context.conditions.map(c => `- ${c.name}${c.severity ? ` (${c.severity})` : ''}`).join('\n')
+        : '- None recorded';
+
+    const allergiesText =
+      context.allergies && context.allergies.length > 0
+        ? context.allergies.map(a => `- ${a}`).join('\n')
+        : '- No known allergies';
+
+    const hospitalText = context.hospital
+      ? `${context.hospital.name ?? 'Unknown'}${context.hospital.phone ? ` • ${context.hospital.phone}` : ''}`
+      : '- None recorded';
+
+    const emergencyText =
+      context.emergencyContacts && context.emergencyContacts.length > 0
+        ? context.emergencyContacts.map(c => `- ${c.name}${c.relation ? ` (${c.relation})` : ''}: ${c.phone}`).join('\n')
+        : '- None recorded';
+
     return `You are RAFIQ, a compassionate healthcare AI assistant for a medical monitoring app.
 You MUST respond in the SAME LANGUAGE the user writes in (Arabic if they write Arabic, English if they write English).
 
@@ -207,11 +223,24 @@ ${vitals.temperature ? `🌡️ Temperature: ${vitals.temperature}°C` : '🌡�
 MEDICATIONS:
 ${medList || '- None recorded'}
 
+CONDITIONS:
+${conditionsText}
+
+ALLERGIES:
+${allergiesText}
+
+HOSPITAL:
+${hospitalText}
+
+EMERGENCY CONTACTS:
+${emergencyText}
+
 GUIDELINES:
 1. Be empathetic and concise
 2. Never provide definitive diagnoses — always recommend consulting a doctor
 3. For emergencies, direct to emergency services immediately
-4. Keep responses focused (2-4 sentences for quick questions)`;
+4. CRITICAL: Always check the patient's allergies and conditions before recommending any medication or food
+5. Keep responses focused (2-4 sentences for quick questions)`;
   }
 
   private markSuccess(): void {

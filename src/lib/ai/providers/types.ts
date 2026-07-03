@@ -37,6 +37,11 @@ export interface HealthContext {
   }[];
   recentAlerts: string[];
   lastUpdated: string;
+  conditions?: Array<{ name: string; severity?: string | null; isActive?: boolean }>;
+  allergies?: string[];
+  hospital?: { name?: string | null; phone?: string | null; address?: string | null };
+  emergencyContacts?: Array<{ name: string; phone: string; relation?: string }>;
+  profileCompletion?: { percentage: number; missingFields: string[] };
 }
 
 export interface AIProviderConfig {

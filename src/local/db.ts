@@ -14,43 +14,6 @@ export function createUuid(): string {
   return createRuntimeUuid();
 }
 
-// ─── FIX #2: Separate PRAGMAs from CREATE TABLE ────────────────────────
-// In expo-sqlite v16, PRAGMAs sent via execAsync alongside CREATE TABLE
-// statements may not take effect reliably. The fix is to run PRAGMAs
-// as separate execAsync calls AFTER the schema.
-const SCHEMA_PRAGMAS = `
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-`;
-
-const SCHEMA_TABLES_AND_INDEXES = RAFIQ_SQLITE_SCHEMA.replace(
-  /PRAGMA\s+foreign_keys\s*=\s*ON\s*;?/gi,
-  ''
-).replace(
-  /PRAGMA\s+journal_mode\s*=\s*WAL\s*;?/gi,
-  ''
-).replace(
-  /PRAGMA\s+synchronous\s*=\s*NORMAL\s*;?/gi,
-  ''
-).trim();
-
-// ─── FIX #3: Run PRAGMA foreign_keys ON separately with WITH validation ───
-async function enableForeignKeys(db: SQLite.SQLiteDatabase): Promise<void> {
-  try {
-    await db.execAsync('PRAGMA foreign_keys = ON;');
-    // Verify it took effect
-    const rows = await db.getAllAsync<{ foreign_keys: number }>('PRAGMA foreign_keys;');
-    if (rows[0]?.foreign_keys !== 1) {
-      console.warn('[DB] PRAGMA foreign_keys = ON did not take effect, retrying...');
-      await db.execAsync('PRAGMA foreign_keys = ON;');
-    }
-    console.log('[DB] Foreign keys enabled successfully');
-  } catch (err) {
-    console.error('[DB] Failed to enable foreign keys (non-fatal, will continue):', err);
-    // Non-fatal: the app can still work, FK constraints just won't be enforced
-  }
-}
-
 const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) | string> = {
   4: async (db: SQLite.SQLiteDatabase) => {
     const patients = await db.getAllAsync<{ id: string }>(
@@ -71,7 +34,7 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
       'oxygen_alerts', 'heart_rate_alerts', 'respiratory_alerts', 'mqtt_events',
       'sensor_readings', 'smart_home_devices', 'automation_logs', 'radar_presence_logs',
       'ai_conversations', 'ai_messages', 'ai_memory', 'ai_context', 'ai_personality',
-      'ai_voice_sessions', 'ai_emotion_logs', 'ai_reminders', 'realtime_events',
+      'ai_voice_sessions', 'ai_emotion_logs', 'ai_reminders',
     ];
 
     for (const patient of patients) {
@@ -86,7 +49,7 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
               `UPDATE ${table} SET patient_id = ? WHERE patient_id = ?`,
               [newId, oldId]
             );
-          } catch {  }
+          } catch (e) { console.warn("[db.ts migration]", e); }
         }
 
         await db.runAsync(
@@ -103,12 +66,12 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
               await AsyncStorage.setItem(key, newId);
               console.info(`[Migration v4] Updated AsyncStorage ${key}: ${oldId} → ${newId}`);
             }
-          } catch {  }
+          } catch (e) { console.warn("[db.ts migration]", e); }
         }
 
         console.info(`[Migration v4] Migrated patient ${oldId} → ${newId}`);
       } catch (err) {
-        try { await db.execAsync('ROLLBACK'); } catch {  }
+        try { await db.execAsync('ROLLBACK'); } catch (e) { console.warn("[db.ts migration]", e); }
         console.error(`[Migration v4] Failed to migrate patient ${oldId}:`, err);
       }
     }
@@ -130,7 +93,7 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
       `ALTER TABLE patient_conditions ADD COLUMN deleted_at TEXT`,
     ];
     for (const sql of alters) {
-      try { await db.execAsync(sql); } catch {  }
+      try { await db.execAsync(sql); } catch (e) { console.warn("[db.ts migration]", e); }
     }
     console.info('[Migration v5] Soft-delete columns ensured.');
   },
@@ -145,7 +108,7 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
       `ALTER TABLE medications ADD COLUMN deleted_by TEXT`,
     ];
     for (const sql of alters) {
-      try { await db.execAsync(sql); } catch {  }
+      try { await db.execAsync(sql); } catch (e) { console.warn("[db.ts migration]", e); }
     }
     console.info('[Migration v7] version + soft-delete columns ensured on all BaseRepository tables.');
   },
@@ -179,7 +142,6 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
           updated_by_device TEXT,
           deleted_by TEXT,
           deleted_at TEXT,
-          version INTEGER NOT NULL DEFAULT 1,
           created_at TEXT NOT NULL DEFAULT (datetime('now')),
           updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
@@ -193,9 +155,18 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
       await db.execAsync('COMMIT');
       console.info('[Migration v6] Recreated patient_conditions with correct schema.');
     } catch (err) {
-      try { await db.execAsync('ROLLBACK'); } catch {  }
+      try { await db.execAsync('ROLLBACK'); } catch (e) { console.warn("[db.ts migration]", e); }
       console.error('[Migration v6] Failed:', err);
       throw err;
+    }
+  },
+
+  8: async (db: SQLite.SQLiteDatabase) => {
+    try {
+      await db.execAsync('DROP TABLE IF EXISTS realtime_events');
+      console.info('[Migration v8] Dropped realtime_events table (unused).');
+    } catch (err) {
+      console.warn('[Migration v8] Non-fatal error dropping realtime_events:', err);
     }
   },
 };
@@ -218,7 +189,7 @@ async function runBootTimeSafetyChecks(db: SQLite.SQLiteDatabase): Promise<void>
         try {
           await db.execAsync('BEGIN TRANSACTION');
           for (const t of PATIENT_FK_TABLES) {
-            try { await db.runAsync(`UPDATE ${t} SET patient_id = ? WHERE patient_id = ?`, [newId, oldId]); } catch {  }
+            try { await db.runAsync(`UPDATE ${t} SET patient_id = ? WHERE patient_id = ?`, [newId, oldId]); } catch (e) { console.warn("[db.ts migration]", e); }
           }
           await db.runAsync('UPDATE patients SET id = ?, legacy_id = ? WHERE id = ?', [newId, oldId, oldId]);
           await db.execAsync('COMMIT');
@@ -227,11 +198,11 @@ async function runBootTimeSafetyChecks(db: SQLite.SQLiteDatabase): Promise<void>
               if ((await AsyncStorage.getItem(key)) === oldId) {
                 await AsyncStorage.setItem(key, newId);
               }
-            } catch {  }
+            } catch (e) { console.warn("[db.ts migration]", e); }
           }
           console.info(`[DB Boot] Emergency migration: ${oldId} → ${newId}`);
         } catch (err) {
-          try { await db.execAsync('ROLLBACK'); } catch {  }
+          try { await db.execAsync('ROLLBACK'); } catch (e) { console.warn("[db.ts migration]", e); }
           console.error(`[DB Boot] Emergency migration failed for ${oldId}:`, err);
         }
       }
@@ -260,7 +231,7 @@ async function runBootTimeSafetyChecks(db: SQLite.SQLiteDatabase): Promise<void>
       ['medications', 'deleted_by', 'TEXT'],
     ];
     for (const [table, col, def] of colsToEnsure) {
-      try { await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch {  }
+      try { await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch (e) { console.warn("[db.ts migration]", e); }
     }
   } catch (err) {
     console.error('[DB Boot] Safety check error (non-fatal):', err);
@@ -304,79 +275,18 @@ async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
           `INSERT OR REPLACE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, datetime('now'))`,
           [v, `migration-v${v}`]
         );
-      } catch {  }
+      } catch (e) { console.warn("[db.ts migration]", e); }
     }
-  }
-}
-
-// ─── FIX #4: Add write verification ─────────────────────────────────────────
-// After DB initialization, do a test write + read to verify the database
-// is actually working, not just that it opened successfully.
-async function verifyDatabaseReadWrite(db: SQLite.SQLiteDatabase): Promise<boolean> {
-  const testId = `__write_test_${Date.now()}`;
-  try {
-    // Write
-    await db.runAsync(
-      'INSERT OR REPLACE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, datetime(\'now\'))',
-      [99999, testId]
-    );
-    // Read back
-    const rows = await db.getAllAsync<{ name: string }>(
-      'SELECT name FROM schema_migrations WHERE name = ?',
-      [testId]
-    );
-    // Cleanup
-    await db.runAsync('DELETE FROM schema_migrations WHERE name = ?', [testId]);
-    return rows.length > 0;
-  } catch (err) {
-    console.error('[DB] Write/read verification FAILED:', err);
-    return false;
   }
 }
 
 export async function getLocalDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = SQLite.openDatabaseAsync(DB_NAME).then(async (db) => {
-      try {
-        // Step 1: Create tables and indexes (without PRAGMAs)
-        await db.execAsync(SCHEMA_TABLES_AND_INDEXES);
-        console.log('[DB] Schema (tables + indexes) created/verified');
-      } catch (schemaErr) {
-        console.error('[DB] FATAL: Schema execution failed:', schemaErr);
-        throw schemaErr;
-      }
-
-      // Step 2: FIX #2 — Enable PRAGMAs separately for reliability
-      try {
-        await db.execAsync(SCHEMA_PRAGMAS);
-        console.log('[DB] WAL mode + synchronous NORMAL set');
-      } catch (pragmaErr) {
-        console.warn('[DB] PRAGMA (WAL/synchronous) failed (non-fatal):', pragmaErr);
-      }
-
-      // Step 3: Enable foreign keys separately
-      await enableForeignKeys(db);
-
-      // Step 4: Run migrations
+      await db.execAsync(RAFIQ_SQLITE_SCHEMA);
       await runMigrations(db);
-
-      // Step 5: Boot-time safety checks
       await runBootTimeSafetyChecks(db);
-
-      // Step 6: FIX #4 — Verify database is actually read-write capable
-      const verified = await verifyDatabaseReadWrite(db);
-      if (!verified) {
-        console.error('[DB] WARNING: Database read/write verification failed!');
-      } else {
-        console.log('[DB] Database initialized successfully — all tables ready + R/W verified');
-      }
-
       return db;
-    }).catch((openErr) => {
-      console.error('[DB] FATAL: Cannot open database:', openErr);
-      // Reset the promise so next call retries
-      dbPromise = null;
-      throw openErr;
     });
   }
   return dbPromise;
@@ -384,17 +294,7 @@ export async function getLocalDb(): Promise<SQLite.SQLiteDatabase> {
 
 export async function run(sql: string, params: SqlValue[] = []): Promise<SQLite.SQLiteRunResult> {
   const db = await getLocalDb();
-  try {
-    const result = await db.runAsync(sql, params as SQLite.SQLiteBindValue[]);
-    if (__DEV__ && result.changes === 0 && sql.trim().startsWith('INSERT')) {
-      console.warn('[SQLite] INSERT produced 0 changes — possible constraint violation:', sql.slice(0, 120));
-    }
-    return result;
-  } catch (err) {
-    console.error('[SQLite] runAsync FAILED:', err instanceof Error ? err.message : String(err));
-    console.error('[SQLite] SQL:', sql.slice(0, 200));
-    throw err;
-  }
+  return db.runAsync(sql, params as SQLite.SQLiteBindValue[]);
 }
 
 export async function all<T>(sql: string, params: SqlValue[] = []): Promise<T[]> {

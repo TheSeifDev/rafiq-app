@@ -339,11 +339,11 @@ export interface PatientNormalizedRow {
   location: string | null;
   created_at: string;
   updated_at: string | null;
-  version: number;
-  updated_by_device: string | null;
-  is_deleted: number;
-  deleted_at: string | null;
-  deleted_by: string | null;
+  version?: number;
+  updated_by_device?: string | null;
+  is_deleted?: number;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
 }
 
 export class EmergencyContactRepository extends BaseRepository<EmergencyContactRow, EmergencyContactInsert, EmergencyContactUpdate> {
@@ -447,11 +447,4 @@ export class PatientConditionRepository extends BaseRepository<PatientConditionR
       await this.insert({ ...condition, patient_id: patientId });
     }
   }
-}
-
-let _writeQueue: Promise<unknown> = Promise.resolve();
-
-export function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
-  _writeQueue = _writeQueue.then(fn);
-  return _writeQueue as Promise<T>;
 }

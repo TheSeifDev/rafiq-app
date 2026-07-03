@@ -50,7 +50,7 @@ function ensureSlots(times: string[], scheduleType: string): string[] {
     : scheduleType === 'three_times_daily' ? 3
     : base.length;
   while (base.length < need) base.push('');
-  return [...base.slice(0, Math.max(3, need))];
+  return [...base.slice(0, Math.max(1, need))];
 }
 
 export function MedicationScheduleEditor({
@@ -70,7 +70,6 @@ export function MedicationScheduleEditor({
 
   const times = useMemo(() => ensureSlots(value.times, value.scheduleType), [value.times, value.scheduleType]);
 
-  // Local state for custom days (maintained inside editor)
   const [customDays, setCustomDays] = useState<number[]>(value.customDays ?? []);
   const [exactTime, setExactTime] = useState(value.exactTime ?? '');
 
@@ -109,7 +108,7 @@ export function MedicationScheduleEditor({
         ))}
       </View>
 
-      {/* Custom schedule: day-of-week picker */}
+      {}
       {value.scheduleType === 'custom' && (
         <View style={{ gap: spacing.sm }}>
           <AppText style={[styles.sectionLabel, { color: colors.textSecondary }]}>
@@ -156,7 +155,7 @@ export function MedicationScheduleEditor({
         ))}
       </View>
 
-      {/* Exact time entry for 'exact' mealRule */}
+      {}
       {value.mealRule === 'exact' && (() => {
         const valid = !!normalizeTime(exactTime);
         const bad = exactTime.trim().length > 0 && !valid;

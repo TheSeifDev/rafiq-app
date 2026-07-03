@@ -1,8 +1,3 @@
-// ─────────────────────────────────────────
-// Structured JSONB Sub-types
-// ─────────────────────────────────────────
-
-/** Detailed address for ambulance / emergency teams */
 export interface AddressData {
   governorate?: string;
   district?: string;
@@ -15,7 +10,6 @@ export interface AddressData {
   extra_notes?: string;
 }
 
-/** Reporter / caregiver — the person filling the profile */
 export interface ReporterData {
   name?: string;
   relationship?: string;
@@ -23,7 +17,6 @@ export interface ReporterData {
   is_primary_contact?: boolean;
 }
 
-/** Preferred hospital information */
 export interface HospitalData {
   name?: string;
   address?: string;
@@ -32,9 +25,6 @@ export interface HospitalData {
   file_number?: string;
 }
 
-// ─────────────────────────────────────────
-// Patients
-// ─────────────────────────────────────────
 export interface Patient {
   id: string;
   user_id: string;
@@ -48,26 +38,19 @@ export interface Patient {
   risk_level: string | null;
   notes: string | null;
   relationship: string | null;
-  // Structured JSONB
   address_data: AddressData;
   reporter_data: ReporterData;
   hospital_data: HospitalData;
-  // Location
   latitude: number | null;
   longitude: number | null;
   geocoded_address: string | null;
-  // Legacy (deprecated — kept for backward compat)
   address?: string | null;
   emergency_contact?: string | null;
   location?: string | null;
-  // Timestamps
   created_at: string;
   updated_at: string | null;
 }
 
-// ─────────────────────────────────────────
-// Emergency Contacts (normalized table)
-// ─────────────────────────────────────────
 export interface EmergencyContact {
   id: string;
   patient_id: string;
@@ -79,11 +62,11 @@ export interface EmergencyContact {
   notes: string | null;
   created_at: string;
   updated_at: string | null;
-  version: number;
-  updated_by_device: string | null;
-  is_deleted: number;
-  deleted_at: string | null;
-  deleted_by: string | null;
+  version?: number;
+  updated_by_device?: string | null;
+  is_deleted?: number;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
 }
 
 export interface EmergencyContactInsert {
@@ -97,9 +80,6 @@ export interface EmergencyContactInsert {
   [key: string]: unknown;
 }
 
-// ─────────────────────────────────────────
-// Patient Conditions (normalized table)
-// ─────────────────────────────────────────
 export interface PatientCondition {
   id: string;
   patient_id: string;
@@ -127,9 +107,6 @@ export interface PatientConditionInsert {
   [key: string]: unknown;
 }
 
-// ─────────────────────────────────────────
-// Vitals (legacy — patient_health table)
-// ─────────────────────────────────────────
 export interface PatientHealth {
   id: string;
   patient_id: string;
@@ -140,7 +117,6 @@ export interface PatientHealth {
   created_at: string;
 }
 
-/** Legacy vitals record from the `vitals` table (user_id based) */
 export interface VitalRecord {
   id: string;
   user_id: string;
@@ -151,10 +127,6 @@ export interface VitalRecord {
   created_at: string;
 }
 
-// ─────────────────────────────────────────
-// Vitals Readings (new — vitals_readings table)
-// Supports manual entry + smartwatch/BLE
-// ─────────────────────────────────────────
 export type VitalsReadingSource = 'manual' | 'smartwatch' | 'ble';
 
 export interface VitalsReading {
@@ -187,9 +159,6 @@ export interface VitalsReadingInsert {
   recorded_at?: string;
 }
 
-// ─────────────────────────────────────────
-// Medications
-// ─────────────────────────────────────────
 export interface Medication {
   id: string;
   patient_id: string;
@@ -202,7 +171,6 @@ export interface Medication {
   instructions: string | null;
   is_active: boolean;
 
-  // v2 scheduling + stock (nullable for older rows)
   strength: string | null;
   category: string | null;
   reason: string | null;
@@ -248,9 +216,6 @@ export interface MedicationInsert {
   active?: boolean;
 }
 
-// ─────────────────────────────────────────
-// Medication Logs
-// ─────────────────────────────────────────
 export interface MedicationLog {
   id: string;
   medication_id: string;
@@ -269,10 +234,6 @@ export interface MedicationLogInsert {
   note?: string | null;
 }
 
-// ─────────────────────────────────────────
-// Sync Payload Contract
-// ─────────────────────────────────────────
-
 export interface SyncPayload {
   id: string;
   entity: string;
@@ -284,10 +245,6 @@ export interface SyncPayload {
   created_at: string;
   updated_at: string;
 }
-
-// ─────────────────────────────────────────
-// Notifications
-// ─────────────────────────────────────────
 
 export type NotificationType = 'critical' | 'reminder' | 'general';
 
@@ -301,9 +258,6 @@ export interface Notification {
   created_at: string;
 }
 
-// ─────────────────────────────────────────
-// Chat
-// ─────────────────────────────────────────
 export type ChatRole = 'user' | 'assistant';
 
 export interface ChatMessage {
@@ -320,9 +274,6 @@ export interface ChatMessageInsert {
   content: string;
 }
 
-// ─────────────────────────────────────────
-// BLE / Smartwatch
-// ─────────────────────────────────────────
 export interface BleDevice {
   id: string;
   name: string | null;

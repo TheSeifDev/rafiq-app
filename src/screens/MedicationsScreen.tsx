@@ -29,10 +29,7 @@ import { MedicationFormSheet } from '../components/medications/MedicationFormShe
 import { syncMedicationReminders, syncSingleMedicationNotifications, computeMissedDosesForToday } from '../lib/notifications/medicationReminders';
 import { cancelAllRemindersForMedication } from '../lib/notifications/notificationService';
 
-// MedicationsScreen is used as both a main tab and inside ProfileStack.
-// Flexible navigation type avoids prop conflicts in both contexts.
 type Props = { navigation: any };
-
 
 export function MedicationsScreen({ navigation }: Props): React.JSX.Element {
   const session = useAuthStore((s) => s.session);
@@ -71,7 +68,6 @@ export function MedicationsScreen({ navigation }: Props): React.JSX.Element {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyItems, setHistoryItems] = useState<Array<{ taken_at: string; skipped: boolean; note: string | null }>>([]);
 
-  // Use theme tokens — no hardcoded colors
   const surfaceBg = colors.surface;
   const cardBorder = colors.border;
 
@@ -82,7 +78,6 @@ export function MedicationsScreen({ navigation }: Props): React.JSX.Element {
       if (!profile) return;
       const data = await medicationService.getMedications(profile.id);
 
-      // Today logs (real doses taken / missed estimation)
       const start = new Date();
       start.setHours(0, 0, 0, 0);
       const end = new Date(start);
@@ -109,7 +104,6 @@ export function MedicationsScreen({ navigation }: Props): React.JSX.Element {
       setTodayScheduledCount(scheduled);
       setTodayMissedCount(missed);
 
-      // Sync device reminders + generate low stock / missed-dose checks (deduped)
       syncMedicationReminders({
         patientId: profile.id,
         userId: session.user.id,
@@ -119,11 +113,9 @@ export function MedicationsScreen({ navigation }: Props): React.JSX.Element {
         prefs: notificationPrefs,
       }).catch(() => undefined);
 
-      // Stronger missed-dose computation (used to keep dashboard correct if schedule is time-based)
       const missedCalc = computeMissedDosesForToday({ medications: data, logsToday: logs, graceMinutes: 60 });
       if (missedCalc.missedCount !== missed) setTodayMissedCount(missedCalc.missedCount);
     } catch {
-      // silent
     } finally {
       setLoading(false);
     }
@@ -178,7 +170,7 @@ export function MedicationsScreen({ navigation }: Props): React.JSX.Element {
             is_active: (editing.active ?? editing.is_active) !== false,
           });
         } else {
-          await medicationService.addMedication({
+          const saved = await medicationService.addMedication({
             patient_id: profile.id,
             name: result.name,
             dosage: (result.strength ?? '').trim(),
@@ -203,20 +195,21 @@ export function MedicationsScreen({ navigation }: Props): React.JSX.Element {
             end_date: null,
             instructions: null,
           });
+
+          setShowForm(false);
+          setEditing(null);
+          await load();
+
+          const freshMed = await medicationService.getMedication(saved.id);
+          if (freshMed) {
+            syncSingleMedicationNotifications(freshMed, language).catch(() => undefined);
+          }
+          return;
         }
 
         setShowForm(false);
         setEditing(null);
         await load();
-
-        // ✅ Schedule notifications immediately after save
-        // load() triggers syncMedicationReminders but we also sync this specific med
-        // to guarantee the new/updated schedule takes effect right away.
-        const freshList = await medicationService.getMedications((await patientService.getProfile(session.user.id))?.id ?? '');
-        const savedMed = freshList.find((m) => m.name === result.name);
-        if (savedMed) {
-          syncSingleMedicationNotifications(savedMed, language).catch(() => undefined);
-        }
       } catch {
         Alert.alert(isAr ? 'تعذر الحفظ' : 'Save failed', isAr ? 'تحقق من البيانات المدخلة.' : 'Please check the entered data.');
       } finally {
@@ -329,7 +322,6 @@ export function MedicationsScreen({ navigation }: Props): React.JSX.Element {
       const next = !((med.active ?? med.is_active) !== false);
       try {
         await medicationService.setActive(med.id, next);
-        // ✅ Immediately sync notifications for this med
         const updatedMed = { ...med, active: next, is_active: next };
         syncSingleMedicationNotifications(updatedMed, language).catch(() => undefined);
         await load();
@@ -352,7 +344,6 @@ export function MedicationsScreen({ navigation }: Props): React.JSX.Element {
             style: 'destructive',
             onPress: async () => {
               try {
-                // ✅ Cancel reminders before deleting
                 await cancelAllRemindersForMedication(med.id).catch(() => undefined);
                 await medicationService.deleteMedication(med.id);
                 await load();
@@ -602,7 +593,10 @@ export function MedicationsScreen({ navigation }: Props): React.JSX.Element {
                   }
                   setRefilling(true);
                   try {
-                    await medicationService.updateMedication(refillMed.id, { remaining_quantity: n, quantity_type: 'pills' });
+                    await medicationService.updateMedication(refillMed.id, {
+                      remaining_quantity: n,
+                      total_quantity: Math.max(n, refillMed.total_quantity ?? n),
+                    });
                     setRefillMed(null);
                     await load();
                   } catch {

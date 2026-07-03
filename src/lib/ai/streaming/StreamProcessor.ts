@@ -1,16 +1,3 @@
-/**
- * Stream Processor — Expo SDK 54 React Native compatible.
- *
- * STREAMING REMOVED: React Native fetch does NOT support response.body /
- * ReadableStream / getReader(). The StreamProcessor class is kept for
- * interface compatibility but delegates all work to safe JSON parsing.
- *
- * The process() method now uses response.text() → JSON instead of
- * response.body.getReader(), which is the root cause of "No response body".
- */
-
-import { SSEParser, type SSEEvent } from './SSEParser';
-
 export interface StreamConfig {
   throttleMs: number;
   bufferSize: number;
@@ -39,17 +26,8 @@ const DEFAULT_CONFIG: StreamConfig = {
   retryDelayMs: 1000,
 };
 
-/**
- * StreamProcessor — delegates to safe JSON parsing.
- *
- * Kept as a class for backward compatibility. All internal streaming
- * (ReadableStream / getReader) has been removed because it is not
- * supported in Expo SDK 54 React Native.
- */
 export class StreamProcessor {
   private config: StreamConfig;
-  // SSEParser kept only so imports from SSEParser.ts still compile
-  private parser: SSEParser;
   private isActive: boolean = false;
   private chunkBuffer: string = '';
   private reasoningBuffer: string = '';
@@ -57,15 +35,8 @@ export class StreamProcessor {
 
   constructor(config: Partial<StreamConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.parser = new SSEParser();
   }
 
-  /**
-   * Process a fetch Response safely.
-   *
-   * Uses response.text() → JSON instead of response.body.getReader(),
-   * then calls onChunk once with the full content.
-   */
   async process(
     response: Response,
     callbacks: StreamCallbacks
@@ -82,8 +53,6 @@ export class StreamProcessor {
       throw err;
     }
 
-    // Reset state
-    this.parser.reset();
     this.chunkBuffer = '';
     this.reasoningBuffer = '';
     this.totalChunks = 0;
@@ -127,7 +96,6 @@ export class StreamProcessor {
     this.reasoningBuffer = reasoning;
     this.totalChunks = 1;
 
-    // Single onChunk call (no token-by-token streaming on RN)
     try {
       callbacks.onChunk(content, reasoning || undefined);
     } catch (err) {
@@ -167,10 +135,6 @@ export class StreamProcessor {
   }
 }
 
-/**
- * Execute fetch with retry and timeout.
- * Safe on React Native — does not touch response.body.
- */
 export async function fetchWithRetry(
   url: string,
   options: RequestInit & { timeout?: number },
@@ -193,7 +157,6 @@ export async function fetchWithRetry(
 
       clearTimeout(timeoutId);
 
-      // Never retry 429 — retrying rate-limited requests wastes quota
       if (response.status === 429) {
         const retryAfter = response.headers.get('Retry-After');
         const err = new Error(`RateLimitError: 429 Too Many Requests${retryAfter ? ` (retry after ${retryAfter}s)` : ''}`);
@@ -202,7 +165,6 @@ export async function fetchWithRetry(
         throw err;
       }
 
-      // Retry on server errors (5xx) but not on 4xx
       if (!response.ok && response.status >= 500 && attempt < config.maxRetries) {
         const delay = config.retryDelayMs * Math.pow(2, attempt);
         await new Promise(resolve => setTimeout(resolve, delay));

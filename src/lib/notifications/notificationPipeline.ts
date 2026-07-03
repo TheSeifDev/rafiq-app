@@ -420,6 +420,25 @@ export async function deliverNotification(payload: NotificationPayload): Promise
     category,
   });
 
+  // FIX (P2-10): Wire in the reliability system so delivery is tracked and
+  // pending deliveries can be verified. Previously the receipt-tracking code
+  // in notificationReliability.ts was architecturally orphaned — never called.
+  try {
+    const { createReliableReceipt, markDelivered, verifyPendingDeliveries } =
+      await import('./notificationReliability');
+    await createReliableReceipt(inserted.id, payload);
+    await markDelivered(inserted.id);
+    // Verify pending deliveries 30s later (best-effort, non-blocking).
+    setTimeout(() => {
+      verifyPendingDeliveries().catch((err) =>
+        console.warn('[Pipeline] verifyPendingDeliveries failed:', err)
+      );
+    }, 30_000);
+  } catch (err) {
+    // Non-fatal — reliability tracking is best-effort.
+    console.warn('[Pipeline] reliability tracking failed (non-fatal):', err);
+  }
+
   return inserted.id;
 }
 
