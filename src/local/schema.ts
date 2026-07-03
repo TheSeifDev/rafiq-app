@@ -1,4 +1,4 @@
-export const RAFIQ_SQLITE_SCHEMA_VERSION = 8;
+export const RAFIQ_SQLITE_SCHEMA_VERSION = 9;
 
 export const RAFIQ_SQLITE_SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS emergency_contacts (
   email TEXT,
   priority INTEGER NOT NULL DEFAULT 1,
   is_primary INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
   is_deleted INTEGER NOT NULL DEFAULT 0,
   updated_by_device TEXT,
   deleted_by TEXT,

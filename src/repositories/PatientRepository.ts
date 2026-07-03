@@ -160,8 +160,14 @@ function serializeJsonb(val: unknown): string | null {
   return JSON.stringify(val);
 }
 
+// FIX (P2-7): Previously returned a new value on EVERY call. Now cached at
+// module scope so it's stable within a session. For true cross-session
+// persistence, use the async getDeviceId() from lib/database/helpers.ts.
+let _cachedDeviceId: string | null = null;
 function getDeviceId(): string {
-  return `device_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  if (_cachedDeviceId) return _cachedDeviceId;
+  _cachedDeviceId = `device_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  return _cachedDeviceId;
 }
 
 export class PatientRepository extends BaseRepository<PatientRow, PatientInsert, PatientUpdate> {
@@ -246,9 +252,13 @@ export class PatientRepository extends BaseRepository<PatientRow, PatientInsert,
       risk_level: payload.risk_level ?? null,
       notes: payload.notes ?? null,
       relationship: payload.relationship ?? 'self',
-      address_data: payload.address_data ? JSON.stringify(payload.address_data) : null,
-      reporter_data: payload.reporter_data ? JSON.stringify(payload.reporter_data) : null,
-      hospital_data: payload.hospital_data ? JSON.stringify(payload.hospital_data) : null,
+      // FIX (E3): Schema has `NOT NULL DEFAULT '{}'` for these columns, but
+      // passing `null` explicitly overrides the default and violates the
+      // constraint. Use '{}' (empty JSON object) when the payload doesn't
+      // provide a value, so the NOT NULL constraint is satisfied.
+      address_data: payload.address_data ? JSON.stringify(payload.address_data) : '{}',
+      reporter_data: payload.reporter_data ? JSON.stringify(payload.reporter_data) : '{}',
+      hospital_data: payload.hospital_data ? JSON.stringify(payload.hospital_data) : '{}',
       latitude: payload.latitude ?? null,
       longitude: payload.longitude ?? null,
       geocoded_address: payload.geocoded_address ?? null,

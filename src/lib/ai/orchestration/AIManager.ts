@@ -496,9 +496,21 @@ class AIManager {
     const timeoutController = new AbortController();
     const timeoutId = setTimeout(() => timeoutController.abort(), this.config.timeoutMs);
 
-    const combinedSignal = callerSignal
-      ? AbortSignal.any([callerSignal, timeoutController.signal])
-      : timeoutController.signal;
+    // FIX (E1): AbortSignal.any() is NOT available in React Native's Hermes
+    // engine (throws "AbortSignal.any is not a function"). Build a manual
+    // composite: forward abort from either source to a combined controller.
+    const combinedController = new AbortController();
+    const onCallerAbort = () => combinedController.abort();
+    const onTimeoutAbort = () => combinedController.abort();
+    if (callerSignal) {
+      if (callerSignal.aborted) {
+        combinedController.abort();
+      } else {
+        callerSignal.addEventListener('abort', onCallerAbort, { once: true });
+      }
+    }
+    timeoutController.signal.addEventListener('abort', onTimeoutAbort, { once: true });
+    const combinedSignal = combinedController.signal;
 
     let response: Response;
     try {
@@ -518,6 +530,9 @@ class AIManager {
       throw new Error(`[AI Manager] Network request failed: ${msg}`);
     } finally {
       clearTimeout(timeoutId);
+      // FIX (E1): Clean up event listeners to avoid memory leaks.
+      if (callerSignal) callerSignal.removeEventListener('abort', onCallerAbort);
+      timeoutController.signal.removeEventListener('abort', onTimeoutAbort);
     }
 
     if (!response.ok) {

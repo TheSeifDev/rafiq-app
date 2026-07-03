@@ -14,6 +14,50 @@ export function createUuid(): string {
   return createRuntimeUuid();
 }
 
+/**
+ * FIX (E2): Check if a column exists on a table before attempting
+ * `ALTER TABLE ADD COLUMN`. The migrations v5/v7 and the boot-time safety
+ * checks were all blindly running `ALTER TABLE ADD COLUMN` for columns that
+ * ALREADY exist in the canonical schema (created by `CREATE TABLE IF NOT
+ * EXISTS`), producing noisy "duplicate column name" errors on every startup.
+ *
+ * This helper queries `PRAGMA table_info` and returns true if the column
+ * is already present.
+ */
+async function columnExists(db: SQLite.SQLiteDatabase, table: string, column: string): Promise<boolean> {
+  try {
+    const cols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+    return cols.some((c) => c.name === column);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * FIX (E2): Add a column ONLY if it doesn't already exist. Silent no-op
+ * if the column is present. Errors are still logged for real failures
+ * (e.g. typo in column name).
+ */
+async function addColumnIfMissing(
+  db: SQLite.SQLiteDatabase,
+  table: string,
+  column: string,
+  definition: string
+): Promise<void> {
+  if (await columnExists(db, table, column)) {
+    return; // already present — skip silently
+  }
+  try {
+    await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  } catch (e) {
+    // Only log if the column STILL doesn't exist after the attempt —
+    // avoids noise when another concurrent process added it.
+    if (!(await columnExists(db, table, column))) {
+      console.warn(`[db.ts migration] ADD COLUMN ${table}.${column} failed:`, e);
+    }
+  }
+}
+
 const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) | string> = {
   4: async (db: SQLite.SQLiteDatabase) => {
     const patients = await db.getAllAsync<{ id: string }>(
@@ -78,37 +122,40 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
   },
 
   5: async (db: SQLite.SQLiteDatabase) => {
-    const alters = [
-      `ALTER TABLE patients ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`,
-      `ALTER TABLE patients ADD COLUMN updated_by_device TEXT`,
-      `ALTER TABLE patients ADD COLUMN deleted_by TEXT`,
-      `ALTER TABLE patients ADD COLUMN deleted_at TEXT`,
-      `ALTER TABLE emergency_contacts ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`,
-      `ALTER TABLE emergency_contacts ADD COLUMN updated_by_device TEXT`,
-      `ALTER TABLE emergency_contacts ADD COLUMN deleted_by TEXT`,
-      `ALTER TABLE emergency_contacts ADD COLUMN deleted_at TEXT`,
-      `ALTER TABLE patient_conditions ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`,
-      `ALTER TABLE patient_conditions ADD COLUMN updated_by_device TEXT`,
-      `ALTER TABLE patient_conditions ADD COLUMN deleted_by TEXT`,
-      `ALTER TABLE patient_conditions ADD COLUMN deleted_at TEXT`,
+    // FIX (E2): Use addColumnIfMissing to avoid "duplicate column name" errors
+    // when the canonical schema already created these columns via CREATE TABLE.
+    const cols: Array<[string, string, string]> = [
+      ['patients', 'is_deleted', 'INTEGER NOT NULL DEFAULT 0'],
+      ['patients', 'updated_by_device', 'TEXT'],
+      ['patients', 'deleted_by', 'TEXT'],
+      ['patients', 'deleted_at', 'TEXT'],
+      ['emergency_contacts', 'is_deleted', 'INTEGER NOT NULL DEFAULT 0'],
+      ['emergency_contacts', 'updated_by_device', 'TEXT'],
+      ['emergency_contacts', 'deleted_by', 'TEXT'],
+      ['emergency_contacts', 'deleted_at', 'TEXT'],
+      ['patient_conditions', 'is_deleted', 'INTEGER NOT NULL DEFAULT 0'],
+      ['patient_conditions', 'updated_by_device', 'TEXT'],
+      ['patient_conditions', 'deleted_by', 'TEXT'],
+      ['patient_conditions', 'deleted_at', 'TEXT'],
     ];
-    for (const sql of alters) {
-      try { await db.execAsync(sql); } catch (e) { console.warn("[db.ts migration]", e); }
+    for (const [table, col, def] of cols) {
+      await addColumnIfMissing(db, table, col, def);
     }
     console.info('[Migration v5] Soft-delete columns ensured.');
   },
 
   7: async (db: SQLite.SQLiteDatabase) => {
-    const alters = [
-      `ALTER TABLE patient_conditions ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
-      `ALTER TABLE emergency_contacts ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
-      `ALTER TABLE medications ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
-      `ALTER TABLE medications ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`,
-      `ALTER TABLE medications ADD COLUMN updated_by_device TEXT`,
-      `ALTER TABLE medications ADD COLUMN deleted_by TEXT`,
+    // FIX (E2): Use addColumnIfMissing to avoid "duplicate column name" errors.
+    const cols: Array<[string, string, string]> = [
+      ['patient_conditions', 'version', 'INTEGER NOT NULL DEFAULT 1'],
+      ['emergency_contacts', 'version', 'INTEGER NOT NULL DEFAULT 1'],
+      ['medications', 'version', 'INTEGER NOT NULL DEFAULT 1'],
+      ['medications', 'is_deleted', 'INTEGER NOT NULL DEFAULT 0'],
+      ['medications', 'updated_by_device', 'TEXT'],
+      ['medications', 'deleted_by', 'TEXT'],
     ];
-    for (const sql of alters) {
-      try { await db.execAsync(sql); } catch (e) { console.warn("[db.ts migration]", e); }
+    for (const [table, col, def] of cols) {
+      await addColumnIfMissing(db, table, col, def);
     }
     console.info('[Migration v7] version + soft-delete columns ensured on all BaseRepository tables.');
   },
@@ -169,6 +216,15 @@ const MIGRATIONS: Record<number, ((db: SQLite.SQLiteDatabase) => Promise<void>) 
       console.warn('[Migration v8] Non-fatal error dropping realtime_events:', err);
     }
   },
+
+  // FIX (E4): v9 migration — add `notes` column to emergency_contacts.
+  // The canonical schema now includes it (for fresh installs), but existing
+  // installs need an ALTER TABLE to add it. Uses addColumnIfMissing to be
+  // idempotent and avoid "duplicate column" errors.
+  9: async (db: SQLite.SQLiteDatabase) => {
+    await addColumnIfMissing(db, 'emergency_contacts', 'notes', 'TEXT');
+    console.info('[Migration v9] emergency_contacts.notes column ensured.');
+  },
 };
 
 async function runBootTimeSafetyChecks(db: SQLite.SQLiteDatabase): Promise<void> {
@@ -220,6 +276,7 @@ async function runBootTimeSafetyChecks(db: SQLite.SQLiteDatabase): Promise<void>
       ['emergency_contacts', 'deleted_by', 'TEXT'],
       ['emergency_contacts', 'deleted_at', 'TEXT'],
       ['emergency_contacts', 'version', 'INTEGER NOT NULL DEFAULT 1'],
+      ['emergency_contacts', 'notes', 'TEXT'],
       ['patient_conditions', 'version', 'INTEGER NOT NULL DEFAULT 1'],
       ['patient_conditions', 'is_deleted', 'INTEGER NOT NULL DEFAULT 0'],
       ['patient_conditions', 'updated_by_device', 'TEXT'],
@@ -230,8 +287,10 @@ async function runBootTimeSafetyChecks(db: SQLite.SQLiteDatabase): Promise<void>
       ['medications', 'updated_by_device', 'TEXT'],
       ['medications', 'deleted_by', 'TEXT'],
     ];
+    // FIX (E2): Use addColumnIfMissing to avoid "duplicate column name" errors
+    // on every boot — the canonical schema already creates these columns.
     for (const [table, col, def] of colsToEnsure) {
-      try { await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch (e) { console.warn("[db.ts migration]", e); }
+      await addColumnIfMissing(db, table, col, def);
     }
   } catch (err) {
     console.error('[DB Boot] Safety check error (non-fatal):', err);

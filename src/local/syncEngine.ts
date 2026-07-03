@@ -25,91 +25,67 @@ const PUSHABLE_TABLES = new Set(allowedTables().filter((table) => ![
   'profiles',
 ].includes(table)));
 
+// FIX (E5): Trimmed PULL_TABLES to only include tables that ACTUALLY EXIST
+// in the Supabase database (per the migrations in supabase/migrations/).
+// The old list included ~20 local-only tables (esp32_devices, vitals_readings,
+// patient_conditions, emergency_events, fall_detection_events, oxygen_alerts,
+// heart_rate_alerts, respiratory_alerts, mqtt_events, sensor_readings,
+// automation_logs, relay_logs, radar_presence_logs, ai_memory, ai_context,
+// ai_personality, ai_voice_sessions, ai_emotion_logs, ai_reminders, etc.)
+// which all failed on every pull, producing noisy "pulled=8, failed=32" logs.
+// These tables are local-only (not synced to Supabase) and are correctly
+// omitted from the pull list.
 const PULL_TABLES = [
   'patients',
-  'patient_conditions',
   'emergency_contacts',
   'devices',
-  'esp32_devices',
   'wearables',
-  'vitals_readings',
+  'vitals',
   'medications',
   'medication_logs',
   'reminders',
   'notifications',
-  'notification_receipts',
-  'alerts',
-  'emergency_events',
-  'fall_detection_events',
   'gas_alerts',
-  'oxygen_alerts',
-  'heart_rate_alerts',
-  'respiratory_alerts',
-  'mqtt_events',
-  'sensor_readings',
+  'fall_events',
   'smart_home_devices',
-  'smart_home_commands',
-  'automation_logs',
-  'relay_logs',
-  'radar_presence_logs',
   'ai_conversations',
   'ai_messages',
-  'ai_memory',
-  'ai_context',
-  'ai_personality',
-  'ai_voice_sessions',
-  'ai_emotion_logs',
-  'ai_reminders',
 ];
 
 const UPDATED_AT_TABLES = new Set([
   'patients',
-  'patient_conditions',
   'emergency_contacts',
   'devices',
-  'esp32_devices',
   'wearables',
-  'medications',
-  'reminders',
-  'notifications',
-  'notification_receipts',
-  'alerts',
-  'emergency_events',
-  'smart_home_devices',
-  'ai_conversations',
-  'ai_memory',
-  'ai_context',
-  'ai_personality',
-]);
-
-const USER_SCOPED_TABLES = new Set([
-  'patients',
-  'patient_conditions',
-  'emergency_contacts',
-  'devices',
-  'esp32_devices',
-  'wearables',
-  'vitals_readings',
+  'vitals',
   'medications',
   'medication_logs',
   'reminders',
   'notifications',
-  'notification_receipts',
-  'alerts',
-  'emergency_events',
-  'fall_detection_events',
   'gas_alerts',
-  'oxygen_alerts',
-  'heart_rate_alerts',
-  'respiratory_alerts',
+  'fall_events',
+  'smart_home_devices',
   'ai_conversations',
   'ai_messages',
-  'ai_memory',
-  'ai_context',
-  'ai_personality',
-  'ai_voice_sessions',
-  'ai_emotion_logs',
-  'ai_reminders',
+]);
+
+// FIX (E5): Trimmed USER_SCOPED_TABLES to match PULL_TABLES — only tables
+// that exist in Supabase AND have a user_id column.
+const USER_SCOPED_TABLES = new Set([
+  'patients',
+  'emergency_contacts',
+  'devices',
+  'wearables',
+  'vitals',
+  'medications',
+  'medication_logs',
+  'reminders',
+  'notifications',
+  'gas_alerts',
+  'fall_events',
+  'smart_home_devices',
+  'ai_conversations',
+  'ai_messages',
 ]);
 
 const PULL_PAGE_SIZE = 1000;
@@ -270,15 +246,33 @@ export const localSyncEngine = {
           offset += PULL_PAGE_SIZE;
         } while (pageRows.length === PULL_PAGE_SIZE);
       } catch (err) {
-        failed++;
-        await logSync({
-          userId: options.userId,
-          direction: 'pull',
-          tableName: table,
-          status: 'failed',
-          failed: 1,
-          details: { error: err instanceof Error ? err.message : String(err) },
-        });
+        // FIX (E5): Distinguish between "table doesn't exist in Supabase" (skip
+        // silently — these are local-only tables like ai_*, mqtt_events, etc.)
+        // and real errors (RLS violation, network, etc.). Previously every
+        // missing table counted as a "failed" pull, producing noisy logs like
+        // "pulled=8, failed=32" on every startup.
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const isMissingTable =
+          errMsg.includes('Could not find the table') ||
+          errMsg.includes('relation') && errMsg.includes('does not exist') ||
+          errMsg.includes('schema cache lookup failed') ||
+          errMsg.includes('42P01'); // Postgres undefined_table
+
+        if (isMissingTable) {
+          // Local-only table or not yet created in Supabase — skip silently.
+          // Only log at debug level to avoid noise.
+          console.info(`[SyncEngine] Pull: table '${table}' not in Supabase — skipping (local-only).`);
+        } else {
+          failed++;
+          await logSync({
+            userId: options.userId,
+            direction: 'pull',
+            tableName: table,
+            status: 'failed',
+            failed: 1,
+            details: { error: errMsg },
+          });
+        }
       }
     }
 
